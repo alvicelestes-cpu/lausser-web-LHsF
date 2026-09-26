@@ -41,6 +41,13 @@ export interface CartItem {
   notes?: string;
 }
 
+export interface PdfCatalogInfo {
+  fileName: string;
+  fileSize: number;
+  updatedAt: string;
+  isUploaded?: boolean;
+}
+
 export interface CampaignConfig {
   campaignNumber: string;
   closingDate: string; // ISO date string
@@ -55,6 +62,11 @@ export interface CampaignConfig {
     ésika: string;
     cyzone: string;
     lbel: string;
+  };
+  catalogPdfInfo?: {
+    ésika?: PdfCatalogInfo | null;
+    cyzone?: PdfCatalogInfo | null;
+    lbel?: PdfCatalogInfo | null;
   };
 }
 

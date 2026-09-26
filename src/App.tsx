@@ -9,12 +9,22 @@ import { AdminPanel } from './components/admin/AdminPanel';
 import { AdminLoginModal } from './components/admin/AdminLoginModal';
 import { CartDrawer } from './components/cart/CartDrawer';
 import { MagazineOrderModal } from './components/catalog/MagazineOrderModal';
+import { PdfCatalogModal } from './components/catalog/PdfCatalogModal';
 import { ProductDetailModal } from './components/products/ProductDetailModal';
 import { ToastContainer } from './components/common/ToastContainer';
 import { Lock } from 'lucide-react';
 
 const MainContent: React.FC = () => {
-  const { currentTab, setCurrentTab, isAdminAuthenticated, setIsAdminLoginOpen } = useStore();
+  const { 
+    currentTab, 
+    setCurrentTab, 
+    isAdminAuthenticated, 
+    setIsAdminLoginOpen,
+    isPdfViewerOpen,
+    setIsPdfViewerOpen,
+    activePdfBrand,
+    openMagazineOrderWithPrefill
+  } = useStore();
 
   // Support /admin URL hash or direct routing
   useEffect(() => {
@@ -84,6 +94,15 @@ const MainContent: React.FC = () => {
       {/* Global Drawers and Modals */}
       <CartDrawer />
       <MagazineOrderModal />
+      <PdfCatalogModal
+        isOpen={isPdfViewerOpen}
+        brand={activePdfBrand}
+        onClose={() => setIsPdfViewerOpen(false)}
+        onOpenOrderModal={(brand, page) => {
+          setIsPdfViewerOpen(false);
+          openMagazineOrderWithPrefill(brand, page);
+        }}
+      />
       <ProductDetailModal />
       <AdminLoginModal />
       <ToastContainer />

@@ -3,7 +3,6 @@ import {
   BookOpen, 
   Sparkles, 
   FileText, 
-  ExternalLink, 
   Calendar,
   CheckCircle2,
   ArrowRight
@@ -32,33 +31,33 @@ export interface CatalogBrandCard {
 
 export interface CatalogCardProps {
   card: CatalogBrandCard;
-  catalogUrl: string;
   campaignNumber: string;
   closingDate: string;
+  hasPdfUploaded?: boolean;
+  onOpenPdfViewer: () => void;
   onOrderClick: () => void;
 }
 
 export const CatalogCard: React.FC<CatalogCardProps> = ({
   card,
-  catalogUrl,
   campaignNumber,
   closingDate,
+  hasPdfUploaded,
+  onOpenPdfViewer,
   onOrderClick,
 }) => {
   const brandTheme = getBrandTheme(card.brand);
-  const targetUrl = catalogUrl?.trim() || OFFICIAL_BELCORP_CATALOGS[card.brand];
 
   return (
     <div
       className={`bg-white rounded-3xl overflow-hidden border border-neutral-200 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between group ${card.gradient}`}
     >
-      {/* Top Cover Image with Visual Badges - Clickable to open catalog in new tab */}
-      <a
-        href={targetUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={`Abrir Revista Digital ${card.name} en una pestaña nueva`}
-        className="relative aspect-4/3 sm:aspect-16/10 overflow-hidden bg-neutral-900 block cursor-pointer group"
+      {/* Top Cover Image with Visual Badges - Clickable to open internal PDF viewer */}
+      <button
+        type="button"
+        onClick={onOpenPdfViewer}
+        title={`Abrir Revista Digital interactiva de ${card.name}`}
+        className="w-full text-left relative aspect-4/3 sm:aspect-16/10 overflow-hidden bg-neutral-900 block cursor-pointer group"
       >
         <img
           src={card.coverImage}
@@ -79,18 +78,18 @@ export const CatalogCard: React.FC<CatalogCardProps> = ({
         {/* Campaign Pill Top Right */}
         <div className="absolute top-3.5 right-3.5 bg-white/95 backdrop-blur-md text-neutral-900 text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">
           <Sparkles className="w-3 h-3 text-rose-600" />
-          <span>{campaignNumber}</span>
+          <span>{hasPdfUploaded ? 'PDF Listo' : campaignNumber}</span>
         </div>
 
         {/* Title inside cover */}
         <div className="absolute bottom-3.5 left-3.5 right-3.5 text-white">
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-[10px] uppercase font-bold text-rose-300 tracking-widest block">
-              Revista Oficial
+              Revista Digital Interactiva
             </span>
             <span className="text-[10px] bg-white/20 backdrop-blur-xs text-white px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <span>Abrir</span>
-              <ExternalLink className="w-2.5 h-2.5" />
+              <span>Ojear</span>
+              <BookOpen className="w-2.5 h-2.5" />
             </span>
           </div>
           <h3 className="text-xl font-bold font-serif leading-tight">
@@ -98,7 +97,7 @@ export const CatalogCard: React.FC<CatalogCardProps> = ({
           </h3>
           <p className="text-xs text-white/80 line-clamp-1">{card.tagline}</p>
         </div>
-      </a>
+      </button>
 
       {/* Card Body */}
       <div className="p-5 sm:p-6 flex-1 flex flex-col justify-between space-y-4">
@@ -133,17 +132,15 @@ export const CatalogCard: React.FC<CatalogCardProps> = ({
 
         {/* Action Buttons */}
         <div className="pt-2 space-y-2 border-t border-neutral-100">
-          {/* Primary CTA: Open Catalog directly in a new tab (target="_blank" rel="noopener noreferrer") */}
-          <a
-            href={targetUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r ${card.accentColor} hover:opacity-95 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group-hover:scale-[1.01]`}
+          {/* Primary CTA: Open internal PDF viewer */}
+          <button
+            type="button"
+            onClick={onOpenPdfViewer}
+            className={`w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r ${card.accentColor} hover:opacity-95 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group-hover:scale-[1.01] cursor-pointer`}
           >
             <BookOpen className="w-4 h-4" />
             <span>📖 Ver y pasar Revista Digital</span>
-            <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-          </a>
+          </button>
 
           {/* Secondary CTA: Quick code order for this brand */}
           <button
@@ -162,7 +159,12 @@ export const CatalogCard: React.FC<CatalogCardProps> = ({
 };
 
 export const CatalogModule: React.FC = () => {
-  const { campaignConfig, setIsMagazineOrderOpen } = useStore();
+  const { 
+    campaignConfig, 
+    openPdfViewer, 
+    openMagazineOrderWithPrefill, 
+    setIsMagazineOrderOpen 
+  } = useStore();
 
   const catalogBrands: CatalogBrandCard[] = [
     {
@@ -208,13 +210,13 @@ export const CatalogModule: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 mb-2">
             <BookOpen className="w-3.5 h-3.5" />
-            <span>Catálogos Digitales Oficiales Belcorp</span>
+            <span>Visor Interactivo de Revistas Digitales</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900">
             Revistas Interactivas de Campaña {campaignConfig.campaignNumber}
           </h2>
           <p className="text-xs sm:text-sm text-neutral-500 mt-1 max-w-2xl">
-            Abre la revista digital de tu marca preferida, pasa las páginas online y anota los códigos de tus productos deseados para pedirlos directamente por WhatsApp con tu asesora.
+            Abre la revista digital tipo catálogo, pasa página por página con controles de zoom y anota los códigos de tus productos deseados para agregarlos a tu carrito o pedirlos por WhatsApp.
           </p>
         </div>
 
@@ -230,16 +232,17 @@ export const CatalogModule: React.FC = () => {
       {/* 3. Eye-Catching Magazine Brand Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
         {catalogBrands.map((card) => {
-          const catalogUrl = campaignConfig.catalogUrls[card.brand] || OFFICIAL_BELCORP_CATALOGS[card.brand];
+          const hasPdf = Boolean(campaignConfig.catalogPdfInfo?.[card.brand]);
 
           return (
             <CatalogCard
               key={card.brand}
               card={card}
-              catalogUrl={catalogUrl}
               campaignNumber={campaignConfig.campaignNumber}
               closingDate={campaignConfig.closingDate}
-              onOrderClick={() => setIsMagazineOrderOpen(true)}
+              hasPdfUploaded={hasPdf}
+              onOpenPdfViewer={() => openPdfViewer(card.brand)}
+              onOrderClick={() => openMagazineOrderWithPrefill(card.brand)}
             />
           );
         })}
@@ -258,7 +261,7 @@ export const CatalogModule: React.FC = () => {
             </div>
             <h4 className="font-bold text-sm text-neutral-900">Hojea la Revista Digital</h4>
             <p className="text-xs text-neutral-500 leading-relaxed">
-              Haz clic en <strong>"📖 Ver y pasar Revista Digital"</strong> de Ésika, Cyzone o L'Bel para abrir el catálogo interactivo oficial en una nueva pestaña.
+              Haz clic en <strong>"📖 Ver y pasar Revista Digital"</strong> de Ésika, Cyzone o L'Bel para abrir el catálogo interactivo página por página con controles de zoom y navegación.
             </p>
           </div>
 

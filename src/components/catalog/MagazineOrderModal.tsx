@@ -1,11 +1,18 @@
-import React, { useState } from 'react';
-import { X, FileText, Plus, Minus, Sparkles, Check, HelpCircle, ExternalLink, BookOpen } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, FileText, Plus, Minus, Sparkles, Check, HelpCircle, BookOpen } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import type { ActiveBrand } from '../../types';
 import { getBrandTheme } from '../../utils/formatters';
 
 export const MagazineOrderModal: React.FC = () => {
-  const { isMagazineOrderOpen, setIsMagazineOrderOpen, addMagazineItemToCart, setIsCartOpen, campaignConfig } = useStore();
+  const { 
+    isMagazineOrderOpen, 
+    setIsMagazineOrderOpen, 
+    addMagazineItemToCart, 
+    setIsCartOpen, 
+    openPdfViewer, 
+    magazineOrderPrefill 
+  } = useStore();
 
   const [brand, setBrand] = useState<ActiveBrand>('ésika');
   const [code, setCode] = useState('');
@@ -15,6 +22,17 @@ export const MagazineOrderModal: React.FC = () => {
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<{ code?: string }>({});
+
+  useEffect(() => {
+    if (isMagazineOrderOpen && magazineOrderPrefill) {
+      if (magazineOrderPrefill.brand) {
+        setBrand(magazineOrderPrefill.brand);
+      }
+      if (magazineOrderPrefill.page) {
+        setPage(magazineOrderPrefill.page);
+      }
+    }
+  }, [isMagazineOrderOpen, magazineOrderPrefill]);
 
   if (!isMagazineOrderOpen) return null;
 
@@ -111,19 +129,17 @@ export const MagazineOrderModal: React.FC = () => {
               })}
             </div>
 
-            {/* Direct link to open magazine in a new tab */}
+            {/* Direct button to open internal PDF viewer */}
             <div className="mt-2.5 flex items-center justify-between text-xs bg-neutral-50 px-3 py-2 rounded-xl border border-neutral-200">
               <span className="text-neutral-500 font-medium">¿Quieres hojear el catálogo?</span>
-              <a
-                href={campaignConfig.catalogUrls[brand] || `https://${brand === 'ésika' ? 'esika' : brand}.tiendabelcorp.com.co/catalogo-digital`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 font-bold text-rose-600 hover:text-rose-700 hover:underline"
+              <button
+                type="button"
+                onClick={() => openPdfViewer(brand)}
+                className="inline-flex items-center gap-1.5 font-bold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
               >
                 <BookOpen className="w-3.5 h-3.5" />
-                <span>Abrir Revista {brandsList.find((b) => b.id === brand)?.name}</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
+                <span>Abrir Visor Revista {brandsList.find((b) => b.id === brand)?.name}</span>
+              </button>
             </div>
           </div>
 

@@ -20,8 +20,9 @@ import {
   Upload,
   X,
   Loader2,
-  ExternalLink,
-  RotateCcw
+  FileText,
+  Clock,
+  Sparkles
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import type { ActiveBrand, ProductCategory } from '../../types';
@@ -41,7 +42,10 @@ export const AdminPanel: React.FC = () => {
     logoutAdmin,
     changeAdminPassword,
     resetAdminPassword,
-    defaultAdminPassword
+    defaultAdminPassword,
+    openPdfViewer,
+    uploadCatalogPdf,
+    deleteCatalogPdfFile
   } = useStore();
 
   const [activeAdminTab, setActiveAdminTab] = useState<'nuevo' | 'inventario' | 'campana' | 'seguridad'>('nuevo');
@@ -204,6 +208,59 @@ export const AdminPanel: React.FC = () => {
     setCyzoneUrl(campaignConfig.catalogUrls?.cyzone || OFFICIAL_CATALOG_URLS.cyzone);
     setLbelUrl(campaignConfig.catalogUrls?.lbel || OFFICIAL_CATALOG_URLS.lbel);
   }, [campaignConfig]);
+
+  // PDF Catalog Management states
+  const [uploadingBrand, setUploadingBrand] = useState<ActiveBrand | null>(null);
+  const [pdfUrlInputs, setPdfUrlInputs] = useState<Record<ActiveBrand, string>>({
+    ésika: campaignConfig.catalogPdfUrls?.ésika || '',
+    cyzone: campaignConfig.catalogPdfUrls?.cyzone || '',
+    lbel: campaignConfig.catalogPdfUrls?.lbel || '',
+  });
+
+  useEffect(() => {
+    setPdfUrlInputs({
+      ésika: campaignConfig.catalogPdfUrls?.ésika || '',
+      cyzone: campaignConfig.catalogPdfUrls?.cyzone || '',
+      lbel: campaignConfig.catalogPdfUrls?.lbel || '',
+    });
+  }, [campaignConfig.catalogPdfUrls]);
+
+  const handlePdfFileUpload = async (brandToUpload: ActiveBrand, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Por favor selecciona un archivo PDF válido (.pdf).');
+      return;
+    }
+    setUploadingBrand(brandToUpload);
+    try {
+      await uploadCatalogPdf(brandToUpload, file);
+    } finally {
+      setUploadingBrand(null);
+      e.target.value = '';
+    }
+  };
+
+  const handleSavePdfUrl = (brandToSave: ActiveBrand) => {
+    const url = (pdfUrlInputs[brandToSave] || '').trim();
+    updateCampaignConfig({
+      catalogPdfUrls: {
+        ...campaignConfig.catalogPdfUrls,
+        [brandToSave]: url,
+      },
+      catalogPdfInfo: {
+        ...campaignConfig.catalogPdfInfo,
+        [brandToSave]: url
+          ? {
+              fileName: url.split('/').pop() || `catalogo-${brandToSave}.pdf`,
+              fileSize: 0,
+              updatedAt: new Date().toISOString(),
+              isUploaded: false,
+            }
+          : null,
+      },
+    });
+  };
 
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -926,166 +983,187 @@ export const AdminPanel: React.FC = () => {
               </div>
             </div>
 
-            {/* Catalog URLs */}
-            <div className="pt-2 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-2">
+            {/* --- SECCIÓN PRINCIPAL: CARGA Y GESTIÓN DE REVISTAS PDF --- */}
+            <div className="pt-4 border-t border-neutral-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <span className="text-xs font-bold text-neutral-800 uppercase block">
-                    Enlaces a las Revistas Digitales (Apertura Directa)
-                  </span>
-                  <p className="text-[11px] text-neutral-500 mt-0.5">
-                    Pega aquí tu enlace de catálogo personalizado de consultora Belcorp o mantén las URLs oficiales activas de Colombia.
+                  <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wide flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-rose-600" />
+                    <span>Carga y Gestión de Revistas PDF para Visor Interactivo</span>
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Sube el archivo PDF de cada marca para que tus clientes puedan hojearlo página por página dentro de la tienda.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEsikaUrl(OFFICIAL_CATALOG_URLS.ésika);
-                    setCyzoneUrl(OFFICIAL_CATALOG_URLS.cyzone);
-                    setLbelUrl(OFFICIAL_CATALOG_URLS.lbel);
-                  }}
-                  className="self-start sm:self-auto text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer flex items-center gap-1 shrink-0"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Restablecer todas a oficiales Colombia</span>
-                </button>
               </div>
 
               {/* Informative alert box */}
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-2xl text-xs text-neutral-600 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-neutral-800">
-                  <ExternalLink className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Apertura externa garantizada en nueva pestaña</span>
+              <div className="p-3.5 bg-rose-50/60 border border-rose-200 rounded-2xl text-xs text-rose-950 flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold block">Visor de PDF Integrado sin Redirecciones:</span>
+                  <p className="text-[11px] text-rose-900/80 leading-relaxed">
+                    Al subir un PDF, el botón "📖 Ver y pasar Revista Digital" abrirá inmediatamente el visor modal interactivo con paso de páginas, zoom, pantalla completa y acceso directo a pedir productos por código. Si una marca no tiene PDF, se mostrará un mensaje amigable indicando que estará disponible pronto.
+                  </p>
                 </div>
-                <p className="text-[11px] leading-relaxed text-neutral-500">
-                  Los botones <strong>"📖 Ver y pasar Revista Digital"</strong> abren directamente en una nueva pestaña (<code>target="_blank" rel="noopener noreferrer"</code>) para evitar bloqueos por políticas de seguridad (CORS / X-Frame-Options) de Belcorp.
-                </p>
               </div>
 
-              {/* Ésika Input Card */}
-              <div className="p-4 rounded-2xl border border-neutral-200 bg-white space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-rose-700 flex items-center gap-1.5 uppercase">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
-                    <span>Revista Digital Ésika</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEsikaUrl(OFFICIAL_CATALOG_URLS.ésika)}
-                      className="text-[11px] font-medium text-neutral-500 hover:text-rose-600 transition-colors cursor-pointer"
-                      title="Restablecer a URL oficial de Colombia"
-                    >
-                      Oficial Colombia
-                    </button>
-                    {esikaUrl && (
-                      <a
-                        href={esikaUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-semibold text-rose-600 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <span>Probar</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://esika.tiendabelcorp.com.co/catalogo-digital o tu link de consultora"
-                  value={esikaUrl}
-                  onChange={(e) => setEsikaUrl(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 text-xs sm:text-sm focus:border-rose-500 focus:outline-none"
-                />
-                <span className="text-[10px] text-neutral-400 block font-mono">
-                  Por defecto: {OFFICIAL_CATALOG_URLS.ésika}
-                </span>
-              </div>
+              {/* Cards Grid for Each Brand */}
+              <div className="space-y-4">
+                {(['ésika', 'cyzone', 'lbel'] as ActiveBrand[]).map((brandKey) => {
+                  const bTheme = getBrandTheme(brandKey);
+                  const bName = brandKey === 'ésika' ? 'Ésika' : brandKey === 'cyzone' ? 'Cyzone' : "L'Bel";
+                  const pdfInfo = campaignConfig.catalogPdfInfo?.[brandKey];
+                  const hasDirectUrl = Boolean(campaignConfig.catalogPdfUrls?.[brandKey]);
+                  const hasPdf = Boolean(pdfInfo || hasDirectUrl);
+                  const isUploading = uploadingBrand === brandKey;
 
-              {/* Cyzone Input Card */}
-              <div className="p-4 rounded-2xl border border-neutral-200 bg-white space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-fuchsia-700 flex items-center gap-1.5 uppercase">
-                    <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-600"></span>
-                    <span>Revista Digital Cyzone</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCyzoneUrl(OFFICIAL_CATALOG_URLS.cyzone)}
-                      className="text-[11px] font-medium text-neutral-500 hover:text-fuchsia-600 transition-colors cursor-pointer"
-                      title="Restablecer a URL oficial de Colombia"
+                  return (
+                    <div
+                      key={brandKey}
+                      className="bg-neutral-50/70 border border-neutral-200 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xs"
                     >
-                      Oficial Colombia
-                    </button>
-                    {cyzoneUrl && (
-                      <a
-                        href={cyzoneUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-semibold text-fuchsia-600 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <span>Probar</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://cyzone.tiendabelcorp.com.co/catalogo-digital o tu link de consultora"
-                  value={cyzoneUrl}
-                  onChange={(e) => setCyzoneUrl(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 text-xs sm:text-sm focus:border-rose-500 focus:outline-none"
-                />
-                <span className="text-[10px] text-neutral-400 block font-mono">
-                  Por defecto: {OFFICIAL_CATALOG_URLS.cyzone}
-                </span>
-              </div>
+                      {/* Top Header Row */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`${bTheme.badge} text-xs font-bold uppercase px-3 py-1 rounded-full shadow-2xs`}>
+                            {bName}
+                          </span>
+                          <span className="text-sm font-bold text-neutral-800">
+                            Revista Digital {bName}
+                          </span>
+                        </div>
 
-              {/* L'Bel Input Card */}
-              <div className="p-4 rounded-2xl border border-neutral-200 bg-white space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-amber-800 flex items-center gap-1.5 uppercase">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-700"></span>
-                    <span>Revista Digital L'Bel</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLbelUrl(OFFICIAL_CATALOG_URLS.lbel)}
-                      className="text-[11px] font-medium text-neutral-500 hover:text-amber-800 transition-colors cursor-pointer"
-                      title="Restablecer a URL oficial de Colombia"
-                    >
-                      Oficial Colombia
-                    </button>
-                    {lbelUrl && (
-                      <a
-                        href={lbelUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-semibold text-amber-800 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <span>Probar</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://lbel.tiendabelcorp.com.co/catalogo-digital o tu link de consultora"
-                  value={lbelUrl}
-                  onChange={(e) => setLbelUrl(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 text-xs sm:text-sm focus:border-rose-500 focus:outline-none"
-                />
-                <span className="text-[10px] text-neutral-400 block font-mono">
-                  Por defecto: {OFFICIAL_CATALOG_URLS.lbel}
-                </span>
+                        {/* Status Badge */}
+                        <div className="flex items-center gap-2">
+                          {hasPdf ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>PDF cargado para Campaña activa</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Sin PDF (Próximamente disponible)</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Current PDF Details & Quick Actions */}
+                      {hasPdf && (
+                        <div className="bg-white rounded-2xl p-4 border border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-0.5 text-xs text-neutral-600">
+                            <div className="flex items-center gap-1.5 font-bold text-neutral-900">
+                              <FileText className="w-4 h-4 text-rose-600 shrink-0" />
+                              <span className="truncate max-w-xs">{pdfInfo?.fileName || 'PDF configurado por enlace'}</span>
+                            </div>
+                            {pdfInfo?.fileSize ? (
+                              <p className="text-[11px] text-neutral-500">
+                                Tamaño: {(pdfInfo.fileSize / (1024 * 1024)).toFixed(1)} MB • Actualizado: {new Date(pdfInfo.updatedAt).toLocaleDateString('es-CO')}
+                              </p>
+                            ) : hasDirectUrl ? (
+                              <p className="text-[11px] text-neutral-500 truncate max-w-sm">
+                                URL: {campaignConfig.catalogPdfUrls[brandKey]}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openPdfViewer(brandKey)}
+                              className="px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                              title="Abrir visor modal para comprobar la revista"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Previsualizar Revista</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCatalogPdfFile(brandKey)}
+                              className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                              title="Eliminar PDF actual"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* File Upload & URL Inputs Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                        
+                        {/* Option 1: File Uploader Input */}
+                        <div className="bg-white rounded-2xl p-4 border border-neutral-200 space-y-2">
+                          <span className="text-xs font-bold text-neutral-700 block uppercase">
+                            Opción 1: Subir Archivo PDF (.pdf)
+                          </span>
+                          <p className="text-[11px] text-neutral-500">
+                            Sube el archivo PDF de la revista desde tu celular o computadora. Se guarda localmente con IndexedDB sin límite de tamaño.
+                          </p>
+                          <div>
+                            <input
+                              type="file"
+                              accept="application/pdf"
+                              id={`pdf-file-${brandKey}`}
+                              className="hidden"
+                              onChange={(e) => handlePdfFileUpload(brandKey, e)}
+                              disabled={isUploading}
+                            />
+                            <label
+                              htmlFor={`pdf-file-${brandKey}`}
+                              className={`w-full py-2.5 px-4 rounded-xl border border-dashed border-rose-300 hover:border-rose-500 bg-rose-50/40 hover:bg-rose-50 text-rose-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                                isUploading ? 'opacity-60 cursor-wait' : ''
+                              }`}
+                            >
+                              {isUploading ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                                  <span>Guardando PDF en almacenamiento local...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-4 h-4" />
+                                  <span>{hasPdf ? 'Reemplazar con nuevo archivo PDF' : 'Seleccionar Archivo PDF'}</span>
+                                </>
+                              )}
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Option 2: Direct PDF URL Input */}
+                        <div className="bg-white rounded-2xl p-4 border border-neutral-200 space-y-2">
+                          <span className="text-xs font-bold text-neutral-700 block uppercase">
+                            Opción 2: O ingresar URL directa al PDF
+                          </span>
+                          <p className="text-[11px] text-neutral-500">
+                            Si tu archivo PDF está alojado en Cloudinary, Google Drive o Firebase:
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="url"
+                              placeholder="https://.../revista.pdf"
+                              value={pdfUrlInputs[brandKey] || ''}
+                              onChange={(e) =>
+                                setPdfUrlInputs((prev) => ({ ...prev, [brandKey]: e.target.value }))
+                              }
+                              className="flex-1 px-3 py-2 rounded-xl border border-neutral-300 text-xs focus:border-rose-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSavePdfUrl(brandKey)}
+                              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs transition-colors shrink-0 cursor-pointer"
+                            >
+                              Guardar
+                            </button>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

@@ -9,6 +9,7 @@ import type {
   ActiveBrand
 } from '../types';
 import { initialProducts, initialCampaignConfig } from '../data/mockData';
+import { saveCatalogPdf, deleteCatalogPdf, getAllCatalogPdfInfo } from '../utils/pdfStorage';
 
 interface ToastState {
   id: string;
@@ -37,6 +38,17 @@ interface StoreContextType {
   setIsCartOpen: (open: boolean) => void;
   setIsMagazineOrderOpen: (open: boolean) => void;
   setSelectedProduct: (product: Product | null) => void;
+
+  // PDF Viewer & Magazine Order with Prefill
+  isPdfViewerOpen: boolean;
+  setIsPdfViewerOpen: (open: boolean) => void;
+  activePdfBrand: ActiveBrand;
+  setActivePdfBrand: (brand: ActiveBrand) => void;
+  openPdfViewer: (brand: ActiveBrand) => void;
+  magazineOrderPrefill: { brand?: ActiveBrand; page?: string } | null;
+  openMagazineOrderWithPrefill: (brand: ActiveBrand, page?: string) => void;
+  uploadCatalogPdf: (brand: ActiveBrand, file: File) => Promise<boolean>;
+  deleteCatalogPdfFile: (brand: ActiveBrand) => Promise<void>;
   
   // Cart Actions
   addToCart: (item: Omit<CartItem, 'id'>) => void;
@@ -161,6 +173,92 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isMagazineOrderOpen, setIsMagazineOrderOpen] = useState<boolean>(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [toasts, setToasts] = useState<ToastState[]>([]);
+
+  // PDF Viewer & Magazine Order states
+  const [isPdfViewerOpen, setIsPdfViewerOpen] = useState<boolean>(false);
+  const [activePdfBrand, setActivePdfBrand] = useState<ActiveBrand>('ésika');
+  const [magazineOrderPrefill, setMagazineOrderPrefill] = useState<{ brand?: ActiveBrand; page?: string } | null>(null);
+
+  const openPdfViewer = (brand: ActiveBrand) => {
+    setActivePdfBrand(brand);
+    setIsPdfViewerOpen(true);
+  };
+
+  const openMagazineOrderWithPrefill = (brand: ActiveBrand, page?: string) => {
+    setMagazineOrderPrefill({ brand, page });
+    setIsMagazineOrderOpen(true);
+  };
+
+  // Sync IndexedDB files metadata with campaignConfig on mount
+  useEffect(() => {
+    getAllCatalogPdfInfo().then((infoMap) => {
+      setCampaignConfig((prev) => {
+        let changed = false;
+        const newInfo = { ...(prev.catalogPdfInfo || {}) };
+        for (const b of ['ésika', 'cyzone', 'lbel'] as ActiveBrand[]) {
+          if (infoMap[b]) {
+            const meta = infoMap[b]!;
+            if (!newInfo[b] || newInfo[b]?.fileName !== meta.fileName || newInfo[b]?.fileSize !== meta.fileSize) {
+              newInfo[b] = {
+                fileName: meta.fileName,
+                fileSize: meta.fileSize,
+                updatedAt: meta.updatedAt,
+                isUploaded: true,
+              };
+              changed = true;
+            }
+          }
+        }
+        return changed ? { ...prev, catalogPdfInfo: newInfo } : prev;
+      });
+    }).catch((err) => {
+      console.warn('Error reading stored PDF info:', err);
+    });
+  }, []);
+
+  const uploadCatalogPdf = async (brand: ActiveBrand, file: File): Promise<boolean> => {
+    try {
+      const meta = await saveCatalogPdf(brand, file);
+      setCampaignConfig((prev) => ({
+        ...prev,
+        catalogPdfInfo: {
+          ...prev.catalogPdfInfo,
+          [brand]: {
+            fileName: meta.fileName,
+            fileSize: meta.fileSize,
+            updatedAt: meta.updatedAt,
+            isUploaded: true,
+          },
+        },
+      }));
+      showToast(`PDF de ${brand} guardado con éxito (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
+      return true;
+    } catch (e) {
+      console.error('Error saving PDF file', e);
+      showToast(`Error al guardar el archivo PDF de ${brand}`, 'warning');
+      return false;
+    }
+  };
+
+  const deleteCatalogPdfFile = async (brand: ActiveBrand): Promise<void> => {
+    try {
+      await deleteCatalogPdf(brand);
+      setCampaignConfig((prev) => ({
+        ...prev,
+        catalogPdfUrls: {
+          ...prev.catalogPdfUrls,
+          [brand]: '',
+        },
+        catalogPdfInfo: {
+          ...prev.catalogPdfInfo,
+          [brand]: null,
+        },
+      }));
+      showToast(`Catálogo PDF de ${brand} eliminado`, 'info');
+    } catch (error) {
+      console.error('Error deleting PDF file', error);
+    }
+  };
 
   // Admin authentication state: SIEMPRE bloqueado por defecto al abrir la app o recargar
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
@@ -407,6 +505,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isMagazineOrderOpen,
         selectedProduct,
         toasts,
+        isPdfViewerOpen,
+        setIsPdfViewerOpen,
+        activePdfBrand,
+        setActivePdfBrand,
+        openPdfViewer,
+        magazineOrderPrefill,
+        openMagazineOrderWithPrefill,
+        uploadCatalogPdf,
+        deleteCatalogPdfFile,
         setActiveBrand,
         setActiveCategory,
         setSearchQuery,
