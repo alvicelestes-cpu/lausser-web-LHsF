@@ -48,7 +48,6 @@ export const AdminPanel: React.FC = () => {
     resetAdminPassword,
     defaultAdminPassword,
     openPdfViewer,
-    uploadCatalogPdf,
     deleteCatalogPdfFile,
     syncStatus,
     isSyncing,
@@ -230,137 +229,131 @@ export const AdminPanel: React.FC = () => {
     }
     setUploadingBrand(brandToUpload);
     try {
-      // 1. Sanitizar el nombre del archivo
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const timestamp = Date.now();
-      const storagePath = `${brandToUpload}/${timestamp}_${cleanFileName}`;
+      // 1. Normalizar nombre del archivo y marca (ej. 'ésika' -> 'esika')
+      const brandClean = brandToUpload.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const fileExt = file.name.split('.').pop() || 'pdf';
+      const fileName = `${brandClean}-c15-${Date.now()}.${fileExt}`;
 
-      // 2. Subir al bucket 'catalogs' de Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('catalogs')
-        .upload(storagePath, file, {
-          cacheControl: '3600',
-          upsert: true,
-          contentType: 'application/pdf',
-        });
+      // 2. Subida directa a Supabase Storage (bucket 'catalogs')
+      const { error } = await supabase.storage.from('catalogs').upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: 'application/pdf',
+      });
 
-      if (uploadError) {
-        console.warn('Error al subir PDF a Supabase Storage (bucket catalogs):', uploadError);
+      if (error) {
+        console.error('Error al subir PDF a Supabase Storage:', error);
         alert(
-          `Aviso de Supabase Storage: No se pudo subir el archivo al bucket "catalogs" (${uploadError.message}).\n\n` +
-          `Para que el PDF esté disponible globalmente en todos los celulares y dispositivos, por favor ingresa un enlace / URL pública directa (ej. enlace público de Google Drive, Cloudinary o enlace de Somos Belcorp) en la Opción 2.`
+          `Error al subir PDF a la nube (${error.message}).\n\n` +
+          `Verifica que el bucket "catalogs" esté creado en Supabase con acceso público, o pega directamente un enlace público (Drive/Dropbox/Web) en la Opción 2.`
         );
-        // Guardar en almacenamiento local como respaldo
-        await uploadCatalogPdf(brandToUpload, file);
         return;
       }
 
-      if (uploadData) {
-        // 3. Obtener URL pública
-        const { data: urlData } = supabase.storage
-          .from('catalogs')
-          .getPublicUrl(storagePath);
+      // 3. Obtener la URL pública oficial
+      const { data: { publicUrl } } = supabase.storage.from('catalogs').getPublicUrl(fileName);
 
-        const publicUrl = urlData.publicUrl;
-        console.log(`PDF de ${brandToUpload} subido a Supabase Storage:`, publicUrl);
-
-        setPdfUrlInputs((prev) => ({
-          ...prev,
-          [brandToUpload]: publicUrl,
-        }));
-
-        const currentPdfUrls = {
-          ...campaignConfig.catalogPdfUrls,
-          [brandToUpload]: publicUrl,
-        };
-
-        const updatedPdfInfo = {
-          ...campaignConfig.catalogPdfInfo,
-          [brandToUpload]: {
-            fileName: file.name,
-            fileSize: file.size,
-            updatedAt: new Date().toISOString(),
-            isUploaded: true,
-          },
-        };
-
-        const campaignName = campaignNumber.trim() || campaignConfig.campaignNumber || 'Campaña C-15 (2026)';
-        const codeMatch = campaignName.match(/C-\d+/i);
-        const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
-        const isoClosingDate = parseDateTimeLocalToIso(closingDate);
-
-        const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
-        const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
-        const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
-
-        const catalogLinksAndPdfs = {
-          ésika: currentPdfUrls.ésika || safeEsikaUrl,
-          cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
-          lbel: currentPdfUrls.lbel || safeLbelUrl,
-          pdfUrls: currentPdfUrls,
-          catalogUrls: {
-            ésika: safeEsikaUrl,
-            cyzone: safeCyzoneUrl,
-            lbel: safeLbelUrl,
-          },
-          pdfInfo: updatedPdfInfo,
-          whatsappNumber: whatsappNumber.trim(),
-          consultantName: consultantName.trim(),
-        };
-
-        const campaignPayload = {
-          id: 'current_campaign',
-          campaign_name: campaignName,
-          campaign_code: campaignCode,
-          end_date: isoClosingDate,
-          catalogs: catalogLinksAndPdfs,
-          updated_at: new Date().toISOString()
-        };
-
-        const { error: saveError } = await supabase.from('campaign_settings').upsert(campaignPayload);
-        if (saveError) {
-          console.error('Error al guardar en campaign_settings:', saveError);
-          alert('Error al guardar configuración: ' + saveError.message);
-        } else {
-          try {
-            await supabase.from('catalogs').upsert({
-              id: 'active',
-              campaign_number: campaignName,
-              closing_date: isoClosingDate,
-              whatsapp_number: whatsappNumber.trim(),
-              consultant_name: consultantName.trim(),
-              catalog_urls: catalogLinksAndPdfs.catalogUrls,
-              catalog_pdf_urls: currentPdfUrls,
-              catalog_pdf_info: updatedPdfInfo,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'id' });
-          } catch (e) {
-            console.warn(e);
-          }
-
-          const updatedCampaign: CampaignConfig = {
-            campaignNumber: campaignName,
-            closingDate: isoClosingDate,
-            whatsappNumber: whatsappNumber.trim(),
-            consultantName: consultantName.trim(),
-            catalogUrls: catalogLinksAndPdfs.catalogUrls,
-            catalogPdfUrls: currentPdfUrls,
-            catalogPdfInfo: updatedPdfInfo,
-          };
-
-          // Guardar también en almacenamiento local como respaldo
-          await uploadCatalogPdf(brandToUpload, file);
-
-          setCampaignConfig(updatedCampaign);
-          try {
-            localStorage.setItem('lausser_campaign_v1', JSON.stringify(updatedCampaign));
-          } catch (e) {
-            console.error(e);
-          }
-
-          alert(`¡PDF de ${brandToUpload} subido a Supabase Storage y disponible en todos los dispositivos!`);
-        }
+      if (!publicUrl) {
+        throw new Error('No se pudo obtener la URL pública de Supabase Storage.');
       }
+
+      console.log(`PDF de ${brandToUpload} subido exitosamente a Supabase Storage:`, publicUrl);
+
+      // 4. Asignar esa publicUrl como la URL oficial del catálogo para guardarla en campaign_settings
+      setPdfUrlInputs((prev) => ({
+        ...prev,
+        [brandToUpload]: publicUrl,
+      }));
+
+      const currentPdfUrls = {
+        ...campaignConfig.catalogPdfUrls,
+        [brandToUpload]: publicUrl,
+      };
+
+      const updatedPdfInfo = {
+        ...campaignConfig.catalogPdfInfo,
+        [brandToUpload]: {
+          fileName: file.name,
+          fileSize: file.size,
+          updatedAt: new Date().toISOString(),
+          isUploaded: true,
+        },
+      };
+
+      const campaignName = campaignNumber.trim() || campaignConfig.campaignNumber || 'Campaña C-15 (2026)';
+      const codeMatch = campaignName.match(/C-\d+/i);
+      const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+      const isoClosingDate = parseDateTimeLocalToIso(closingDate);
+
+      const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
+      const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
+      const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
+
+      const catalogLinksAndPdfs = {
+        ésika: currentPdfUrls.ésika || safeEsikaUrl,
+        cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
+        lbel: currentPdfUrls.lbel || safeLbelUrl,
+        pdfUrls: currentPdfUrls,
+        catalogUrls: {
+          ésika: safeEsikaUrl,
+          cyzone: safeCyzoneUrl,
+          lbel: safeLbelUrl,
+        },
+        pdfInfo: updatedPdfInfo,
+        whatsappNumber: whatsappNumber.trim(),
+        consultantName: consultantName.trim(),
+      };
+
+      const campaignPayload = {
+        id: 'current_campaign',
+        campaign_name: campaignName,
+        campaign_code: campaignCode,
+        end_date: isoClosingDate,
+        catalogs: catalogLinksAndPdfs,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: saveError } = await supabase.from('campaign_settings').upsert(campaignPayload);
+      if (saveError) {
+        console.error('Error al guardar en campaign_settings:', saveError);
+        alert('El PDF se subió pero ocurrió un error al registrarlo: ' + saveError.message);
+        return;
+      }
+
+      try {
+        await supabase.from('catalogs').upsert({
+          id: 'active',
+          campaign_number: campaignName,
+          closing_date: isoClosingDate,
+          whatsapp_number: whatsappNumber.trim(),
+          consultant_name: consultantName.trim(),
+          catalog_urls: catalogLinksAndPdfs.catalogUrls,
+          catalog_pdf_urls: currentPdfUrls,
+          catalog_pdf_info: updatedPdfInfo,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      } catch (catErr) {
+        console.warn('Aviso en catalogs fallback:', catErr);
+      }
+
+      const updatedCampaign: CampaignConfig = {
+        campaignNumber: campaignName,
+        closingDate: isoClosingDate,
+        whatsappNumber: whatsappNumber.trim(),
+        consultantName: consultantName.trim(),
+        catalogUrls: catalogLinksAndPdfs.catalogUrls,
+        catalogPdfUrls: currentPdfUrls,
+        catalogPdfInfo: updatedPdfInfo,
+      };
+
+      setCampaignConfig(updatedCampaign);
+      try {
+        localStorage.setItem('lausser_campaign_v1', JSON.stringify(updatedCampaign));
+      } catch (e) {
+        console.error(e);
+      }
+
+      alert(`¡PDF de ${brandToUpload} subido a la nube y sincronizado para todos los dispositivos!`);
     } catch (err: any) {
       console.error('Error en upload:', err);
       alert('Error al procesar el archivo PDF: ' + (err?.message || err));
@@ -1562,6 +1555,25 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       )}
 
+                      {/* Indicador de subida con barra de progreso */}
+                      {isUploading && (
+                        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-2 animate-pulse">
+                          <div className="flex items-center justify-between text-xs font-bold text-rose-800">
+                            <span className="flex items-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                              <span>Subiendo PDF a la nube... por favor espera</span>
+                            </span>
+                            <span className="text-[11px] text-rose-600 font-semibold">Supabase Storage</span>
+                          </div>
+                          <div className="w-full bg-rose-200/70 h-2.5 rounded-full overflow-hidden">
+                            <div className="bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 h-full w-full rounded-full animate-pulse" />
+                          </div>
+                          <p className="text-[11px] text-rose-700/90">
+                            Guardando archivo y generando URL pública accesible para todos los celulares y computadores...
+                          </p>
+                        </div>
+                      )}
+
                       {/* File Upload & URL Inputs Grid */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                         
@@ -1571,7 +1583,7 @@ export const AdminPanel: React.FC = () => {
                             Opción 1: Subir Archivo PDF a la Nube (Supabase Storage)
                           </span>
                           <p className="text-[11px] text-neutral-500">
-                            Sube el archivo PDF (.pdf) desde tu dispositivo. Se subirá al almacenamiento en la nube para que esté disponible en todos los celulares y computadores.
+                            Sube el archivo PDF (.pdf) desde tu dispositivo. Se subirá directamente al almacenamiento de Supabase para que funcione en todos los celulares.
                           </p>
                           <div>
                             <input
@@ -1591,7 +1603,7 @@ export const AdminPanel: React.FC = () => {
                               {isUploading ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
-                                  <span>Subiendo archivo a Supabase Storage...</span>
+                                  <span>Subiendo PDF a la nube... por favor espera</span>
                                 </>
                               ) : (
                                 <>
@@ -1606,15 +1618,15 @@ export const AdminPanel: React.FC = () => {
                         {/* Option 2: Direct PDF URL Input */}
                         <div className="bg-white rounded-2xl p-4 border border-neutral-200 space-y-2">
                           <span className="text-xs font-bold text-neutral-700 block uppercase">
-                            Opción 2: O ingresar Enlace / URL pública del PDF (Drive / Belcorp)
+                            Opción 2: O ingresar Enlace / URL pública externa (Drive / Dropbox / Web)
                           </span>
                           <p className="text-[11px] text-neutral-500">
-                            Pega un enlace público de Google Drive, Somos Belcorp, Cloudinary o cualquier URL externa. ¡Se sincronizará en todos los celulares!
+                            Pega un enlace público de Google Drive, Dropbox, Somos Belcorp o cualquier URL externa. ¡Se sincronizará en todos los celulares!
                           </p>
                           <div className="flex items-center gap-1.5">
                             <input
                               type="url"
-                              placeholder="https://drive.google.com/... o https://.../revista.pdf"
+                              placeholder="https://drive.google.com/... o https://dropbox.com/... o https://.../revista.pdf"
                               value={pdfUrlInputs[brandKey] || ''}
                               onChange={(e) =>
                                 setPdfUrlInputs((prev) => ({ ...prev, [brandKey]: e.target.value }))

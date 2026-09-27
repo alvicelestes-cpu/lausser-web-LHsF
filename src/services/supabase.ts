@@ -209,12 +209,46 @@ export const mapRowToCampaign = (row: DbCatalogRow | DbCampaignSettingsRow | any
       }
     : (row.catalog_urls || row.catalogUrls || defaultWeb);
 
-  // PDF catalog URLs (Google Drive, Somos Belcorp, Supabase Storage o enlaces directos)
+  // Helper para extraer URL de PDF válida
+  const extractPdfUrl = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'string') {
+      const s = val.trim();
+      if (s.startsWith('http://') || s.startsWith('https://')) {
+        if (
+          s.includes('drive.google.com') ||
+          s.includes('dropbox.com') ||
+          s.includes('storage') ||
+          s.includes('supabase.co') ||
+          s.includes('.pdf') ||
+          s.includes('/pdf') ||
+          s.includes('somosbelcorp.com')
+        ) {
+          return s;
+        }
+      }
+      return '';
+    }
+    if (typeof val === 'object' && val?.pdfUrl) {
+      return String(val.pdfUrl).trim();
+    }
+    return '';
+  };
+
+  const getPdfUrlForBrand = (brandKey: ActiveBrand): string => {
+    const explicitPdf = rawCatalogs.pdfUrls?.[brandKey] || rawCatalogs.pdf_urls?.[brandKey];
+    if (typeof explicitPdf === 'string' && explicitPdf.trim()) {
+      return explicitPdf.trim();
+    }
+    return extractPdfUrl(rawCatalogs[brandKey]);
+  };
+
+  // PDF catalog URLs (Google Drive, Dropbox, Somos Belcorp, Supabase Storage o enlaces directos)
   const catalogPdfUrls = isSettingsFormat
     ? {
-        ésika: rawCatalogs.pdfUrls?.ésika || rawCatalogs.pdf_urls?.ésika || (typeof rawCatalogs.ésika === 'string' && (rawCatalogs.ésika.includes('drive.google.com') || rawCatalogs.ésika.endsWith('.pdf') || rawCatalogs.ésika.includes('/pdf') || rawCatalogs.ésika.includes('storage') || rawCatalogs.ésika.includes('belcorp')) ? rawCatalogs.ésika : '') || (typeof rawCatalogs.ésika === 'object' ? rawCatalogs.ésika?.pdfUrl : '') || '',
-        cyzone: rawCatalogs.pdfUrls?.cyzone || rawCatalogs.pdf_urls?.cyzone || (typeof rawCatalogs.cyzone === 'string' && (rawCatalogs.cyzone.includes('drive.google.com') || rawCatalogs.cyzone.endsWith('.pdf') || rawCatalogs.cyzone.includes('/pdf') || rawCatalogs.cyzone.includes('storage') || rawCatalogs.cyzone.includes('belcorp')) ? rawCatalogs.cyzone : '') || (typeof rawCatalogs.cyzone === 'object' ? rawCatalogs.cyzone?.pdfUrl : '') || '',
-        lbel: rawCatalogs.pdfUrls?.lbel || rawCatalogs.pdf_urls?.lbel || (typeof rawCatalogs.lbel === 'string' && (rawCatalogs.lbel.includes('drive.google.com') || rawCatalogs.lbel.endsWith('.pdf') || rawCatalogs.lbel.includes('/pdf') || rawCatalogs.lbel.includes('storage') || rawCatalogs.lbel.includes('belcorp')) ? rawCatalogs.lbel : '') || (typeof rawCatalogs.lbel === 'object' ? rawCatalogs.lbel?.pdfUrl : '') || '',
+        ésika: getPdfUrlForBrand('ésika'),
+        cyzone: getPdfUrlForBrand('cyzone'),
+        lbel: getPdfUrlForBrand('lbel'),
       }
     : (row.catalog_pdf_urls || row.catalogPdfUrls || { ésika: '', cyzone: '', lbel: '' });
 
@@ -224,24 +258,24 @@ export const mapRowToCampaign = (row: DbCatalogRow | DbCampaignSettingsRow | any
     : (row.catalog_pdf_info || row.catalogPdfInfo || {});
 
   const catalogPdfInfo: CampaignConfig['catalogPdfInfo'] = {
-    ésika: rawPdfInfo.ésika || (catalogPdfUrls.ésika ? {
+    ésika: catalogPdfUrls.ésika ? (rawPdfInfo.ésika || {
       fileName: catalogPdfUrls.ésika.split('/').pop()?.split('?')[0] || 'catalogo-ésika.pdf',
       fileSize: 0,
       updatedAt: row.updated_at || new Date().toISOString(),
       isUploaded: true,
-    } : null),
-    cyzone: rawPdfInfo.cyzone || (catalogPdfUrls.cyzone ? {
+    }) : null,
+    cyzone: catalogPdfUrls.cyzone ? (rawPdfInfo.cyzone || {
       fileName: catalogPdfUrls.cyzone.split('/').pop()?.split('?')[0] || 'catalogo-cyzone.pdf',
       fileSize: 0,
       updatedAt: row.updated_at || new Date().toISOString(),
       isUploaded: true,
-    } : null),
-    lbel: rawPdfInfo.lbel || (catalogPdfUrls.lbel ? {
+    }) : null,
+    lbel: catalogPdfUrls.lbel ? (rawPdfInfo.lbel || {
       fileName: catalogPdfUrls.lbel.split('/').pop()?.split('?')[0] || 'catalogo-lbel.pdf',
       fileSize: 0,
       updatedAt: row.updated_at || new Date().toISOString(),
       isUploaded: true,
-    } : null),
+    }) : null,
   };
 
   return {

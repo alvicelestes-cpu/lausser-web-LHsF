@@ -9,7 +9,7 @@ import type {
   ActiveBrand
 } from '../types';
 import { initialProducts, initialCampaignConfig } from '../data/mockData';
-import { saveCatalogPdf, deleteCatalogPdf } from '../utils/pdfStorage';
+import { deleteCatalogPdf } from '../utils/pdfStorage';
 import { supabase } from '../lib/supabase';
 import {
   mapRowToProduct,
@@ -484,40 +484,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const uploadCatalogPdf = async (brand: ActiveBrand, file: File): Promise<string | null> => {
     try {
       setIsSyncing(true);
-      // 1. Guardar en almacenamiento local IndexedDB como respaldo local
-      await saveCatalogPdf(brand, file, file.name);
+      const brandKeyClean = brand.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const fileExt = file.name.split('.').pop() || 'pdf';
+      const fileName = `${brandKeyClean}-c15-${Date.now()}.${fileExt}`;
 
-      // 2. Intentar subir al bucket 'catalogs' de Supabase Storage
-      let publicUrl = '';
-      try {
-        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const timestamp = Date.now();
-        const storagePath = `${brand}/${timestamp}_${cleanFileName}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('catalogs')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: 'application/pdf',
+        });
 
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-          .from('catalogs')
-          .upload(storagePath, file, {
-            cacheControl: '3600',
-            upsert: true,
-            contentType: 'application/pdf',
-          });
+      if (uploadErr) {
+        console.error('Error al subir PDF a Supabase Storage:', uploadErr);
+        showToast(`Error al subir PDF a Supabase Storage: ${uploadErr.message}`, 'warning');
+        return null;
+      }
 
-        if (uploadErr) {
-          console.warn('Aviso: No se pudo subir a Supabase Storage bucket "catalogs":', uploadErr.message);
-        } else if (uploadData) {
-          const { data: urlData } = supabase.storage.from('catalogs').getPublicUrl(storagePath);
-          publicUrl = urlData.publicUrl;
-          console.log(`URL pública generada para ${brand}:`, publicUrl);
-        }
-      } catch (storageException) {
-        console.warn('Excepción en storage upload:', storageException);
+      const { data: { publicUrl } } = supabase.storage.from('catalogs').getPublicUrl(fileName);
+      if (!publicUrl) {
+        throw new Error('No se pudo obtener la URL pública de Supabase Storage.');
       }
 
       const newConfig: CampaignConfig = {
         ...campaignConfig,
         catalogPdfUrls: {
           ...campaignConfig.catalogPdfUrls,
-          [brand]: publicUrl || campaignConfig.catalogPdfUrls?.[brand] || '',
+          [brand]: publicUrl,
         },
         catalogPdfInfo: {
           ...campaignConfig.catalogPdfInfo,
@@ -532,11 +526,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setCampaignConfig(newConfig);
       await updateCampaignConfig(newConfig);
-      showToast(`PDF de ${brand} procesado (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
-      return publicUrl || null;
-    } catch (e) {
+      showToast(`PDF de ${brand} subido a la nube con éxito (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
+      return publicUrl;
+    } catch (e: any) {
       console.error('Error procesando archivo PDF', e);
-      showToast(`Error al procesar el archivo PDF de ${brand}`, 'warning');
+      showToast(`Error al procesar el archivo PDF de ${brand}: ${e?.message || e}`, 'warning');
       return null;
     } finally {
       setIsSyncing(false);

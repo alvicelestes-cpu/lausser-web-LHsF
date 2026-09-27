@@ -80,7 +80,7 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
     const loadDocument = async () => {
       try {
         let pdfSource: string | ArrayBuffer | null = null;
-        const configuredUrl = campaignConfig.catalogPdfUrls?.[brand]?.trim();
+        let configuredUrl = campaignConfig.catalogPdfUrls?.[brand]?.trim();
 
         if (configuredUrl) {
           // Detectar si es un enlace de Google Drive para previsualizarlo en iframe
@@ -93,10 +93,17 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
             return;
           }
 
+          // Si es Dropbox, convertir dl=0 a raw=1 para servir el archivo binario del PDF
+          if (configuredUrl.includes('dropbox.com')) {
+            configuredUrl = configuredUrl.replace('dl=0', 'raw=1');
+            if (!configuredUrl.includes('raw=1') && !configuredUrl.includes('dl=1')) {
+              configuredUrl += (configuredUrl.includes('?') ? '&' : '?') + 'raw=1';
+            }
+          }
+
           if (
             configuredUrl.startsWith('http://') ||
-            configuredUrl.startsWith('https://') ||
-            configuredUrl.startsWith('blob:')
+            configuredUrl.startsWith('https://')
           ) {
             pdfSource = configuredUrl;
           }
