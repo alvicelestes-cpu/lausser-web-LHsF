@@ -47,6 +47,31 @@ Plataforma web moderna **Mobile-First** para la venta y gestión de cosméticos 
 - **TypeScript**
 - **Tailwind CSS v4** (`@tailwindcss/vite`)
 - **Lucide Icons**
+- **Supabase Cloud Persistence & Realtime** (`@supabase/supabase-js`)
+
+---
+
+## ☁️ Sincronización en la Nube (Supabase Backend)
+
+Lausser-Web cuenta con una capa de persistencia global en tiempo real mediante **Supabase**, lo que permite que los cambios realizados por la administradora (desde su celular o computadora) se sincronicen de inmediato a todos los clientes que visiten la tienda:
+
+### 1. Variables de Entorno Requeridas
+Crea un archivo `.env` en la raíz del proyecto tomando como base `.env.example`:
+```env
+VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
+VITE_SUPABASE_ANON_KEY=tu-anon-key-aqui
+```
+
+### 2. Esquema de Base de Datos
+Ejecuta el script SQL en el SQL Editor de tu proyecto Supabase:
+- Archivo: [`supabase/schema.sql`](supabase/schema.sql)
+- Crea las tablas `products` y `catalogs`.
+- Habilita Row Level Security (RLS) con políticas de lectura pública y escritura.
+- Configura publicaciones de **Supabase Realtime** para recepción instantánea de altas, bajas y modificaciones.
+- Incluye datos iniciales de prueba (seed).
+
+### 3. Modo de Fallback Seguro
+Si las variables de entorno de Supabase aún no han sido configuradas o no hay conexión a internet, la aplicación activa automáticamente un **Fallback Local Seguro (`localStorage`)** garantizando que la tienda siga funcionando de forma ininterrumpida.
 
 ---
 

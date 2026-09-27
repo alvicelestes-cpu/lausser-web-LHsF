@@ -22,7 +22,10 @@ import {
   Loader2,
   FileText,
   Clock,
-  Sparkles
+  Sparkles,
+  Cloud,
+  CloudOff,
+  Database
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import type { ActiveBrand, ProductCategory } from '../../types';
@@ -45,7 +48,12 @@ export const AdminPanel: React.FC = () => {
     defaultAdminPassword,
     openPdfViewer,
     uploadCatalogPdf,
-    deleteCatalogPdfFile
+    deleteCatalogPdfFile,
+    syncStatus,
+    isSyncing,
+    isCloudSynced,
+    refreshProducts,
+    syncToCloud
   } = useStore();
 
   const [activeAdminTab, setActiveAdminTab] = useState<'nuevo' | 'inventario' | 'campana' | 'seguridad'>('nuevo');
@@ -388,6 +396,101 @@ export const AdminPanel: React.FC = () => {
             <LogOut className="w-4 h-4" />
             <span>Cerrar Sesión</span>
           </button>
+        </div>
+      </div>
+
+      {/* Cloud Synchronization Status Banner */}
+      <div className={`p-4 sm:p-5 rounded-3xl border transition-all ${
+        syncStatus === 'connected'
+          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+          : syncStatus === 'syncing'
+          ? 'bg-sky-50/70 border-sky-200 text-sky-950'
+          : syncStatus === 'error' || syncStatus === 'offline'
+          ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+          : 'bg-neutral-50 border-neutral-200 text-neutral-800'
+      }`}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
+              syncStatus === 'connected'
+                ? 'bg-emerald-600 text-white'
+                : syncStatus === 'syncing'
+                ? 'bg-sky-600 text-white animate-pulse'
+                : syncStatus === 'error' || syncStatus === 'offline'
+                ? 'bg-amber-600 text-white'
+                : 'bg-neutral-700 text-white'
+            }`}>
+              {syncStatus === 'connected' ? (
+                <Cloud className="w-5 h-5" />
+              ) : syncStatus === 'syncing' ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : syncStatus === 'local_fallback' ? (
+                <Database className="w-5 h-5" />
+              ) : (
+                <CloudOff className="w-5 h-5" />
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-sm">
+                  {syncStatus === 'connected' && 'Sincronización Global en la Nube (Activa)'}
+                  {syncStatus === 'syncing' && 'Sincronizando con Supabase...'}
+                  {syncStatus === 'local_fallback' && 'Persistencia Local (Fallback Activo)'}
+                  {(syncStatus === 'offline' || syncStatus === 'error') && 'Modo Offline / Error de Conexión'}
+                </span>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                  syncStatus === 'connected'
+                    ? 'bg-emerald-200 text-emerald-800'
+                    : syncStatus === 'syncing'
+                    ? 'bg-sky-200 text-sky-800'
+                    : syncStatus === 'local_fallback'
+                    ? 'bg-neutral-200 text-neutral-700'
+                    : 'bg-amber-200 text-amber-800'
+                }`}>
+                  {syncStatus === 'connected' ? 'En Tiempo Real' : syncStatus === 'syncing' ? 'Sincronizando' : 'Local'}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-600 leading-relaxed max-w-2xl">
+                {syncStatus === 'connected' && (
+                  'Tus productos y catálogos están conectados a la base de datos Supabase. Los cambios que realices desde tu celular se actualizan al instante en todos los dispositivos de tus clientes sin necesidad de recargar la página.'
+                )}
+                {syncStatus === 'syncing' && (
+                  'Conectando con la base de datos en la nube y verificando las últimas actualizaciones de inventario...'
+                )}
+                {syncStatus === 'local_fallback' && (
+                  'Los productos se guardan de forma segura en este navegador. Para que los cambios que haces en tu celular se reflejen a los clientes en otros dispositivos, configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en tu archivo .env (guía y esquema listos en supabase/schema.sql).'
+                )}
+                {(syncStatus === 'offline' || syncStatus === 'error') && (
+                  'No se pudo conectar con la base de datos en la nube. Se están utilizando los datos guardados en este dispositivo como respaldo seguro.'
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
+            {isCloudSynced ? (
+              <button
+                type="button"
+                onClick={refreshProducts}
+                disabled={isSyncing}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-neutral-50 text-neutral-800 border border-neutral-200 font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-rose-600' : 'text-neutral-500'}`} />
+                <span>{isSyncing ? 'Sincronizando...' : 'Actualizar ahora'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={syncToCloud}
+                disabled={isSyncing}
+                className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Cloud className="w-3.5 h-3.5 text-rose-400" />
+                <span>Subir inventario a la nube</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -772,6 +875,19 @@ export const AdminPanel: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {isCloudSynced && (
+                <button
+                  type="button"
+                  onClick={refreshProducts}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 text-xs text-neutral-600 hover:text-neutral-900 border border-neutral-200 px-3 py-1.5 rounded-xl hover:bg-neutral-50 transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Refrescar productos desde la base de datos Supabase"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-rose-600' : ''}`} />
+                  <span>{isSyncing ? 'Sincronizando...' : 'Refrescar nube'}</span>
+                </button>
+              )}
+
               {products.length > 0 && (
                 <button
                   type="button"
@@ -790,7 +906,7 @@ export const AdminPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={resetToDefaults}
-                className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-900 border border-neutral-200 px-3 py-1.5 rounded-xl hover:bg-neutral-50 transition-colors"
+                className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-900 border border-neutral-200 px-3 py-1.5 rounded-xl hover:bg-neutral-50 transition-colors cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Restablecer demo</span>

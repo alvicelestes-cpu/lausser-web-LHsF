@@ -14,7 +14,8 @@ export const StockModule: React.FC = () => {
     setSearchQuery, 
     setActiveBrand, 
     setActiveCategory,
-    setIsMagazineOrderOpen
+    setIsMagazineOrderOpen,
+    isLoadingProducts
   } = useStore();
 
   // Filter products by brand, category, and search query
@@ -107,7 +108,12 @@ export const StockModule: React.FC = () => {
       </div>
 
       {/* Products Grid */}
-      {filteredProducts.length > 0 ? (
+      {isLoadingProducts && products.length === 0 ? (
+        <div className="py-16 text-center space-y-3">
+          <div className="w-10 h-10 border-3 border-rose-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-xs text-neutral-500 font-medium">Cargando inventario en tiempo real...</p>
+        </div>
+      ) : filteredProducts.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
           {filteredProducts.map((product) => (
             <ProductCard key={product.id} product={product} />
@@ -127,7 +133,7 @@ export const StockModule: React.FC = () => {
           </div>
           <button
             onClick={resetFilters}
-            className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-semibold hover:bg-neutral-800 transition-colors"
+            className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
           >
             Ver todos los productos
           </button>
