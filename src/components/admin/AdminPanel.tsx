@@ -272,27 +272,38 @@ export const AdminPanel: React.FC = () => {
 
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const regularPrice = parseCOP(price);
-    const specialPrice = discountPrice ? parseCOP(discountPrice) : undefined;
+    const regular = price ? parseCOP(price) : 0;
+    const offer = discountPrice ? parseCOP(discountPrice) : 0;
 
-    if (!name.trim() || regularPrice <= 0) {
+    if (!name.trim() || (regular <= 0 && offer <= 0)) {
       alert('Ingresa el nombre del producto y un precio válido en pesos.');
       return;
     }
 
+    // Si el usuario pone precio oferta, ese debe ser product.price (precio final de venta)
+    // y el precio regular debe ser product.originalPrice para mostrar el tachado de descuento.
+    // Si no pone oferta, el precio de venta es el regular.
+    const finalPrice = offer > 0 ? offer : regular;
+    const finalOriginalPrice = offer > 0 && regular > 0 ? regular : undefined;
     const stockQty = parseInt(stock, 10) || 1;
-    const finalImageUrl = imageUrl.trim() || getFallbackProductImage(brand);
+    const finalImage = imageUrl.trim() || getFallbackProductImage(brand);
+    const finalVolume = volumeOrSize.trim() || undefined;
 
     addProduct({
       name: name.trim(),
       brand,
       category,
       code: code.trim() || undefined,
-      price: regularPrice,
-      discountPrice: specialPrice && specialPrice > 0 ? specialPrice : undefined,
+      price: finalPrice,
+      originalPrice: finalOriginalPrice,
+      discountPrice: finalOriginalPrice,
       stock: stockQty,
-      imageUrl: finalImageUrl,
-      volumeOrSize: volumeOrSize.trim() || undefined,
+      imageUrl: finalImage,
+      image: finalImage,
+      image_url: finalImage,
+      volume: finalVolume,
+      presentation: finalVolume,
+      volumeOrSize: finalVolume,
       description: description.trim() || 'Producto original disponible en stock para entrega inmediata.',
       rating: 4.9,
     });
@@ -946,7 +957,7 @@ export const AdminPanel: React.FC = () => {
                   <div key={product.id} className="py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <img
-                        src={product.imageUrl}
+                        src={product.image || product.imageUrl || product.image_url}
                         alt={product.name}
                         className="w-12 h-12 object-cover rounded-xl border border-neutral-200 shrink-0"
                       />
@@ -962,14 +973,16 @@ export const AdminPanel: React.FC = () => {
                         <h4 className="text-sm font-bold text-neutral-900">{product.name}</h4>
                         <div className="text-xs text-neutral-500 flex items-center gap-2">
                           <span className="font-bold text-neutral-800">
-                            {formatCurrency(product.discountPrice || product.price)}
+                            {formatCurrency(product.price)}
                           </span>
-                          {product.discountPrice && (
+                          {product.originalPrice && product.originalPrice > product.price && (
                             <span className="line-through text-neutral-400">
-                              {formatCurrency(product.price)}
+                              {formatCurrency(product.originalPrice)}
                             </span>
                           )}
-                          {product.volumeOrSize && <span>• {product.volumeOrSize}</span>}
+                          {(product.volume || product.presentation || product.volumeOrSize) && (
+                            <span>• {product.volume || product.presentation || product.volumeOrSize}</span>
+                          )}
                         </div>
                       </div>
                     </div>

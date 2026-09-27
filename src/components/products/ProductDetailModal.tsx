@@ -10,8 +10,18 @@ export const ProductDetailModal: React.FC = () => {
   if (!selectedProduct) return null;
 
   const brandTheme = getBrandTheme(selectedProduct.brand);
-  const discountPercent = selectedProduct.discountPrice 
-    ? Math.round(((selectedProduct.price - selectedProduct.discountPrice) / selectedProduct.price) * 100) 
+  const presentation = selectedProduct.volume || selectedProduct.presentation || selectedProduct.volumeOrSize;
+  const imageSrc = selectedProduct.image || selectedProduct.imageUrl || selectedProduct.image_url;
+
+  const hasDiscount = Boolean(
+    (selectedProduct.originalPrice && selectedProduct.originalPrice > selectedProduct.price) ||
+    (selectedProduct.discountPrice && selectedProduct.discountPrice > selectedProduct.price)
+  );
+  const regularPrice = selectedProduct.originalPrice || selectedProduct.discountPrice || selectedProduct.price;
+  const salePrice = selectedProduct.price;
+
+  const discountPercent = hasDiscount && regularPrice > salePrice 
+    ? Math.round(((regularPrice - salePrice) / regularPrice) * 100) 
     : 0;
 
   const handleAdd = (openCart: boolean = false) => {
@@ -20,10 +30,10 @@ export const ProductDetailModal: React.FC = () => {
       productId: selectedProduct.id,
       name: selectedProduct.name,
       brand: selectedProduct.brand,
-      price: selectedProduct.discountPrice || selectedProduct.price,
+      price: selectedProduct.price,
       quantity,
-      imageUrl: selectedProduct.imageUrl,
-      notes: selectedProduct.volumeOrSize,
+      imageUrl: imageSrc,
+      notes: presentation,
     });
     setSelectedProduct(null);
     if (openCart) {
@@ -48,7 +58,7 @@ export const ProductDetailModal: React.FC = () => {
           {/* Image side */}
           <div className="relative bg-neutral-100 aspect-square md:aspect-auto">
             <img
-              src={selectedProduct.imageUrl}
+              src={imageSrc}
               alt={selectedProduct.name}
               className="w-full h-full object-cover"
             />
@@ -90,21 +100,21 @@ export const ProductDetailModal: React.FC = () => {
                 {selectedProduct.name}
               </h2>
 
-              {selectedProduct.volumeOrSize && (
+              {presentation && (
                 <p className="text-xs font-semibold text-rose-600 mt-1">
-                  Presentación: {selectedProduct.volumeOrSize}
+                  Presentación: {presentation}
                 </p>
               )}
 
               {/* Price display */}
               <div className="mt-4 flex items-baseline gap-3">
-                {selectedProduct.discountPrice ? (
+                {hasDiscount ? (
                   <>
-                    <span className="text-2xl sm:text-3xl font-black text-neutral-900">
-                      {formatCurrency(selectedProduct.discountPrice)}
+                    <span className="text-2xl sm:text-3xl font-black text-rose-600">
+                      {formatCurrency(salePrice)}
                     </span>
                     <span className="text-sm text-neutral-400 line-through">
-                      {formatCurrency(selectedProduct.price)}
+                      {formatCurrency(regularPrice)}
                     </span>
                   </>
                 ) : (

@@ -12,8 +12,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { addToCart, setSelectedProduct } = useStore();
   const brandTheme = getBrandTheme(product.brand);
 
-  const discountPercent = product.discountPrice 
-    ? Math.round(((product.price - product.discountPrice) / product.price) * 100) 
+  const presentation = product.volume || product.presentation || product.volumeOrSize;
+  const imageSrc = product.image || product.imageUrl || product.image_url;
+
+  // Si product.originalPrice existe y es mayor a product.price, muestra el precio regular tachado
+  const hasDiscount = Boolean(
+    (product.originalPrice && product.originalPrice > product.price) ||
+    (product.discountPrice && product.discountPrice > product.price)
+  );
+  const regularPrice = product.originalPrice || product.discountPrice || product.price;
+  const salePrice = product.price;
+
+  const discountPercent = hasDiscount && regularPrice > salePrice 
+    ? Math.round(((regularPrice - salePrice) / regularPrice) * 100) 
     : 0;
 
   const handleAddToCart = (e: React.MouseEvent) => {
@@ -23,10 +34,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       productId: product.id,
       name: product.name,
       brand: product.brand,
-      price: product.discountPrice || product.price,
+      price: product.price,
       quantity: 1,
-      imageUrl: product.imageUrl,
-      notes: product.volumeOrSize,
+      imageUrl: imageSrc,
+      notes: presentation,
     });
   };
 
@@ -38,7 +49,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       {/* Top Image Section */}
       <div className="relative aspect-square overflow-hidden bg-neutral-100">
         <img
-          src={product.imageUrl}
+          src={imageSrc}
           alt={product.name}
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
@@ -50,9 +61,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           <span>Entrega Hoy</span>
         </div>
 
-        {/* Brand Tag */}
-        <div className={`absolute top-2.5 right-2.5 ${brandTheme.badge} px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold tracking-wider uppercase shadow-md`}>
-          {product.brand}
+        {/* Brand Tag & Volume */}
+        <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 max-w-[75%]">
+          {presentation && (
+            <span className="bg-white/95 backdrop-blur-md text-neutral-800 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-md truncate">
+              {presentation}
+            </span>
+          )}
+          <span className={`${brandTheme.badge} px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold tracking-wider uppercase shadow-md shrink-0`}>
+            {product.brand}
+          </span>
         </div>
 
         {/* Discount Badge */}
@@ -90,29 +108,33 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             </span>
           </div>
 
+          {/* Category & Presentation (Ml o Tono) */}
+          <div className="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-neutral-500">
+            <span className="capitalize">{product.category.replace('_', ' ')}</span>
+            {presentation && (
+              <>
+                <span>•</span>
+                <span className="font-bold text-neutral-700 truncate">{presentation}</span>
+              </>
+            )}
+          </div>
+
           {/* Product Name */}
           <h3 className="font-bold text-neutral-900 text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-rose-600 transition-colors">
             {product.name}
           </h3>
-
-          {/* Volume or subtitle */}
-          {product.volumeOrSize && (
-            <p className="text-[11px] text-neutral-400 mt-0.5 line-clamp-1">
-              {product.volumeOrSize}
-            </p>
-          )}
         </div>
 
         {/* Price & Action Button */}
         <div className="pt-3 mt-2 border-t border-neutral-100 flex items-center justify-between gap-2">
           <div>
-            {product.discountPrice ? (
+            {hasDiscount ? (
               <div>
                 <span className="text-xs text-neutral-400 line-through block -mb-0.5">
-                  {formatCurrency(product.price)}
+                  {formatCurrency(regularPrice)}
                 </span>
-                <span className="text-sm sm:text-base font-extrabold text-neutral-900">
-                  {formatCurrency(product.discountPrice)}
+                <span className="text-sm sm:text-base font-extrabold text-rose-600">
+                  {formatCurrency(salePrice)}
                 </span>
               </div>
             ) : (

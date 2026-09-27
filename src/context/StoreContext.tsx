@@ -112,13 +112,26 @@ const STORAGE_KEYS = {
 const DEFAULT_ADMIN_PASSWORD = 'Lausser2026';
 
 const sanitizeProducts = (list: Product[]): Product[] => {
-  return list.map((item) => ({
-    ...item,
-    price: item.price > 0 && item.price < 1000 ? Math.round(item.price * 1000) : Math.round(item.price),
-    discountPrice: item.discountPrice && item.discountPrice > 0 && item.discountPrice < 1000 
-      ? Math.round(item.discountPrice * 1000) 
-      : (item.discountPrice ? Math.round(item.discountPrice) : undefined),
-  }));
+  return list.map((item) => {
+    const orig = item.originalPrice || item.discountPrice;
+    const finalOrig = orig && orig > 0 && orig < 1000 ? Math.round(orig * 1000) : (orig ? Math.round(orig) : undefined);
+    const finalPrice = item.price > 0 && item.price < 1000 ? Math.round(item.price * 1000) : Math.round(item.price);
+    const finalImg = item.image || item.imageUrl || item.image_url || '';
+    const finalVol = item.volume || item.presentation || item.volumeOrSize || undefined;
+
+    return {
+      ...item,
+      price: finalPrice,
+      originalPrice: finalOrig,
+      discountPrice: finalOrig,
+      image: finalImg,
+      imageUrl: finalImg,
+      image_url: finalImg,
+      volume: finalVol,
+      presentation: finalVol,
+      volumeOrSize: finalVol,
+    };
+  });
 };
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -374,19 +387,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const syncToCloud = async () => {
     setIsSyncing(true);
     try {
-      const sanitizedRows = products.map((p) => ({
-        id: String(p.id),
-        name: String(p.name || ''),
-        brand: String(p.brand || ''),
-        category: String(p.category || ''),
-        price: Number(p.price || 0),
-        original_price: (p.originalPrice ?? p.discountPrice) ? Number(p.originalPrice ?? p.discountPrice) : null,
-        image: p.image || p.imageUrl || '',
-        in_stock: Boolean(p.inStock ?? true),
-        description: p.description || '',
-        code: p.code ? String(p.code) : null,
-        stock: Number(p.stock ?? 1),
-      }));
+      const sanitizedRows = products.map(mapProductToRow);
 
       const { data, error: prodErr } = await supabase.from('products').upsert(sanitizedRows);
       if (prodErr) {
@@ -619,19 +620,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id,
     };
 
-    const sanitizedProduct = {
-      id: String(newProduct.id),
-      name: String(newProduct.name || ''),
-      brand: String(newProduct.brand || ''),
-      category: String(newProduct.category || ''),
-      price: Number(newProduct.price || 0),
-      original_price: (newProduct.originalPrice ?? newProduct.discountPrice) ? Number(newProduct.originalPrice ?? newProduct.discountPrice) : null,
-      image: newProduct.image || newProduct.imageUrl || '',
-      in_stock: Boolean(newProduct.inStock ?? true),
-      description: newProduct.description || '',
-      code: newProduct.code ? String(newProduct.code) : null,
-      stock: Number(newProduct.stock ?? 1),
-    };
+    const sanitizedProduct = mapProductToRow(newProduct);
 
     // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => [newProduct, ...prev]);
@@ -661,19 +650,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
 
-    const sanitizedProduct = {
-      id: String(updated.id),
-      name: String(updated.name || ''),
-      brand: String(updated.brand || ''),
-      category: String(updated.category || ''),
-      price: Number(updated.price || 0),
-      original_price: (updated.originalPrice ?? updated.discountPrice) ? Number(updated.originalPrice ?? updated.discountPrice) : null,
-      image: updated.image || updated.imageUrl || '',
-      in_stock: Boolean(updated.inStock ?? true),
-      description: updated.description || '',
-      code: updated.code ? String(updated.code) : null,
-      stock: Number(updated.stock ?? 1),
-    };
+    const sanitizedProduct = mapProductToRow(updated);
 
     // 2. Realizar la operación directamente en Supabase con upsert
     try {

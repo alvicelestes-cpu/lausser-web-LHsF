@@ -60,9 +60,18 @@ export const mapRowToProduct = (row: DbProductRow | any): Product => {
   const brand = (row.brand || 'ésika').toLowerCase() as ActiveBrand;
   const category = (row.category || 'perfumeria') as ProductCategory;
   const rawPrice = Number(row.price) || 0;
-  const rawDiscount = row.discount_price !== null && row.discount_price !== undefined
-    ? Number(row.discount_price)
-    : (row.discountPrice !== null && row.discountPrice !== undefined ? Number(row.discountPrice) : undefined);
+  const rawOriginalPrice = row.original_price != null 
+    ? Number(row.original_price) 
+    : (row.discount_price != null ? Number(row.discount_price) : (row.discountPrice != null ? Number(row.discountPrice) : undefined));
+
+  const image = String(row.image || row.image_url || row.imageUrl || '');
+  const volume = row.volume || row.presentation || row.volume_or_size || row.volumeOrSize || undefined;
+  const stock = row.stock != null ? Math.max(0, parseInt(String(row.stock), 10) || 0) : 1;
+
+  const originalPrice = rawOriginalPrice 
+    ? (rawOriginalPrice > 0 && rawOriginalPrice < 1000 ? Math.round(rawOriginalPrice * 1000) : Math.round(rawOriginalPrice)) 
+    : undefined;
+  const price = rawPrice > 0 && rawPrice < 1000 ? Math.round(rawPrice * 1000) : Math.round(rawPrice);
 
   return {
     id: String(row.id),
@@ -70,36 +79,44 @@ export const mapRowToProduct = (row: DbProductRow | any): Product => {
     brand: ['ésika', 'cyzone', 'lbel'].includes(brand) ? brand : 'ésika',
     category,
     code: row.code ? String(row.code) : undefined,
-    price: rawPrice > 0 && rawPrice < 1000 ? Math.round(rawPrice * 1000) : Math.round(rawPrice),
-    discountPrice: rawDiscount && rawDiscount > 0 && rawDiscount < 1000
-      ? Math.round(rawDiscount * 1000)
-      : (rawDiscount ? Math.round(rawDiscount) : undefined),
-    stock: Math.max(0, parseInt(String(row.stock), 10) || 0),
-    imageUrl: String(row.image_url || row.imageUrl || ''),
+    price,
+    originalPrice,
+    discountPrice: originalPrice,
+    stock,
+    image,
+    imageUrl: image,
+    image_url: image,
+    volume,
+    presentation: volume,
+    volumeOrSize: volume,
     description: String(row.description || ''),
     rating: row.rating ? Number(row.rating) : 4.9,
     isFeatured: Boolean(row.is_featured ?? row.isFeatured ?? false),
-    volumeOrSize: row.volume_or_size || row.volumeOrSize || undefined,
+    inStock: Boolean(row.in_stock ?? (stock > 0)),
   };
 };
 
 /**
  * Maps frontend Product model to sanitized database row representation
- * sending ONLY the exact existing columns in the Supabase products table.
+ * sending the exact columns specified for Supabase products table.
  */
 export const sanitizeProductForDb = (product: any) => {
+  const image = String(product.image || product.imageUrl || product.image_url || '');
+  const volume = String(product.volume || product.presentation || product.volumeOrSize || '');
+
   return {
     id: String(product.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7))),
     name: String(product.name || ''),
     brand: String(product.brand || ''),
     category: String(product.category || ''),
     price: Number(product.price || 0),
-    original_price: (product.originalPrice ?? product.discountPrice) ? Number(product.originalPrice ?? product.discountPrice) : null,
-    image: product.image || product.imageUrl || '',
-    in_stock: Boolean(product.inStock ?? (product.stock !== undefined ? product.stock > 0 : true)),
-    description: product.description || '',
-    code: product.code ? String(product.code) : null,
+    original_price: product.originalPrice ? Number(product.originalPrice) : (product.discountPrice ? Number(product.discountPrice) : null),
+    image,
+    image_url: image,
+    code: product.code ? String(product.code) : '',
     stock: Number(product.stock ?? 1),
+    volume,
+    presentation: volume,
   };
 };
 

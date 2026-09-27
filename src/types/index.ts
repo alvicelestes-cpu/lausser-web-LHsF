@@ -25,6 +25,9 @@ export interface Product {
   volumeOrSize?: string;
   originalPrice?: number;
   image?: string;
+  image_url?: string;
+  volume?: string;
+  presentation?: string;
   inStock?: boolean;
 }
 
