@@ -10,19 +10,14 @@ import type {
 } from '../types';
 import { initialProducts, initialCampaignConfig } from '../data/mockData';
 import { saveCatalogPdf, deleteCatalogPdf, getAllCatalogPdfInfo } from '../utils/pdfStorage';
+import { supabase } from '../lib/supabase';
 import {
-  isSupabaseConfigured,
-  fetchProductsFromDb,
-  createProductInDb,
-  updateProductInDb,
-  deleteProductInDb,
-  clearAllProductsInDb,
-  seedProductsInDb,
-  fetchCampaignConfigFromDb,
-  saveCampaignConfigInDb,
-  subscribeToProductsRealtime,
-  subscribeToCatalogsRealtime
+  mapRowToProduct,
+  mapProductToRow,
+  mapRowToCampaign,
+  mapCampaignToRow,
 } from '../services/supabase';
+import type { DbProductRow, DbCatalogRow } from '../services/supabase';
 
 interface ToastState {
   id: string;
@@ -130,20 +125,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Sync state
   const [isLoadingProducts, setIsLoadingProducts] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(isSupabaseConfigured());
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(
-    isSupabaseConfigured() ? 'syncing' : 'local_fallback'
-  );
+  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
 
-  // Load products from localStorage or defaults and ensure prices are in full COP
+  // Inicializa vacío o con el caché para evitar mostrar mocks por defecto
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-      if (saved !== null) return sanitizeProducts(JSON.parse(saved));
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return sanitizeProducts(parsed);
+        }
+      }
     } catch (e) {
       console.error('Failed to load products from storage', e);
     }
-    return sanitizeProducts(initialProducts);
+    return [];
   });
 
   // Load campaign config
@@ -222,41 +220,48 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // ==========================================
-  // INITIAL CLOUD SYNC & REALTIME SUBSCRIPTION
-  // ==========================================
+  // ====================================================================
+  // CARGA INICIAL DIRECTA DESDE SUPABASE Y TIEMPO REAL (REALTIME)
+  // ====================================================================
   useEffect(() => {
     let isMounted = true;
+    setIsLoadingProducts(true);
 
-    const initializeData = async () => {
-      if (!isSupabaseConfigured()) {
-        if (isMounted) {
-          setIsLoadingProducts(false);
-          setIsCloudSynced(false);
-          setSyncStatus('local_fallback');
-        }
-        return;
-      }
-
-      setIsSyncing(true);
+    const loadData = async () => {
       try {
-        // 1. Fetch cloud products
-        const cloudProducts = await fetchProductsFromDb();
-        if (isMounted && cloudProducts !== null) {
-          if (cloudProducts.length > 0) {
-            const sanitized = sanitizeProducts(cloudProducts);
-            setProducts(sanitized);
-            localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(sanitized));
+        // Consulta directa a Supabase
+        const { data, error } = await supabase.from('products').select('*');
+
+        if (error) {
+          console.error('Error al cargar productos de Supabase:', error);
+          if (isMounted) {
+            setSyncStatus('error');
           }
-          setIsCloudSynced(true);
-          setSyncStatus('connected');
-        } else if (isMounted) {
-          setSyncStatus('error');
+        } else if (data !== null) {
+          // Imprime por consola y actualiza con los datos reales de Supabase (incluso si está vacío [])
+          console.log('Productos cargados de Supabase:', data?.length);
+          const mapped = sanitizeProducts(data.map(mapRowToProduct));
+          if (isMounted) {
+            setProducts(mapped);
+            try {
+              localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(mapped));
+            } catch (e) {
+              console.error(e);
+            }
+            setIsCloudSynced(true);
+            setSyncStatus('connected');
+          }
         }
 
-        // 2. Fetch cloud campaign config
-        const cloudCampaign = await fetchCampaignConfigFromDb();
-        if (isMounted && cloudCampaign) {
+        // Consultar configuración de campaña y catálogos en Supabase
+        const { data: catData, error: catError } = await supabase
+          .from('catalogs')
+          .select('*')
+          .eq('id', 'active')
+          .maybeSingle();
+
+        if (!catError && catData && isMounted) {
+          const cloudCampaign = mapRowToCampaign(catData);
           setCampaignConfig((prev) => {
             const updated = {
               ...prev,
@@ -264,83 +269,96 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
               catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
             };
-            localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
+            try {
+              localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
+            } catch (e) {
+              console.error(e);
+            }
             return updated;
           });
         }
       } catch (err) {
-        console.warn('[Sync] Fallback to local storage due to connection error:', err);
+        console.error('Excepción al conectar con Supabase:', err);
         if (isMounted) {
-          setSyncStatus('offline');
+          setSyncStatus('error');
         }
       } finally {
         if (isMounted) {
-          setIsSyncing(false);
           setIsLoadingProducts(false);
+          setIsSyncing(false);
         }
       }
     };
 
-    initializeData();
+    loadData();
 
-    // 3. Realtime subscriptions across all devices
-    if (isSupabaseConfigured()) {
-      const unsubscribeProducts = subscribeToProductsRealtime(
-        (inserted) => {
-          setProducts((prev) => {
-            const exists = prev.some((p) => p.id === inserted.id);
-            if (exists) {
-              return prev.map((p) => (p.id === inserted.id ? inserted : p));
-            }
-            return [inserted, ...prev];
-          });
-        },
-        (updated) => {
-          setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-        },
-        (deletedId) => {
-          setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+    // Activa suscripción en tiempo real: supabase.channel('products-channel').on('postgres_changes', ...)
+    const channel = supabase
+      .channel('products-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          console.log('Cambio en tiempo real recibido de Supabase:', payload);
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const item = mapRowToProduct(payload.new as DbProductRow);
+            setProducts((prev) => {
+              if (prev.some((p) => p.id === item.id)) {
+                return prev.map((p) => (p.id === item.id ? item : p));
+              }
+              return [item, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            const item = mapRowToProduct(payload.new as DbProductRow);
+            setProducts((prev) => prev.map((p) => (p.id === item.id ? item : p)));
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            const deletedId = String(payload.old.id);
+            setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+          }
         }
-      );
+      )
+      .subscribe();
 
-      const unsubscribeCatalogs = subscribeToCatalogsRealtime((newConfig) => {
-        setCampaignConfig((prev) => ({
-          ...prev,
-          ...newConfig,
-        }));
-      });
-
-      return () => {
-        isMounted = false;
-        unsubscribeProducts();
-        unsubscribeCatalogs();
-      };
-    }
+    const catChannel = supabase
+      .channel('catalogs-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'catalogs' },
+        (payload) => {
+          if (payload.new) {
+            const config = mapRowToCampaign(payload.new as DbCatalogRow);
+            setCampaignConfig((prev) => ({ ...prev, ...config }));
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
+      supabase.removeChannel(catChannel);
     };
   }, []);
 
   // Manual refresh from cloud
   const refreshProducts = async () => {
-    if (!isSupabaseConfigured()) {
-      showToast('Configura Supabase en .env para sincronización global', 'info');
-      return;
-    }
-
     setIsSyncing(true);
     try {
-      const cloudProducts = await fetchProductsFromDb();
-      if (cloudProducts !== null) {
-        const sanitized = sanitizeProducts(cloudProducts);
-        setProducts(sanitized);
-        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(sanitized));
-        showToast(`Sincronizado con la nube (${sanitized.length} productos)`, 'success');
+      const { data, error } = await supabase.from('products').select('*');
+      if (error) {
+        console.error('Error refrescando productos de Supabase:', error);
+        showToast('Error al consultar Supabase', 'warning');
+      } else if (data !== null) {
+        console.log('Productos cargados de Supabase:', data?.length);
+        const mapped = sanitizeProducts(data.map(mapRowToProduct));
+        setProducts(mapped);
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(mapped));
+        showToast(`Sincronizado con la nube (${mapped.length} productos)`, 'success');
         setSyncStatus('connected');
       }
-      const cloudCampaign = await fetchCampaignConfigFromDb();
-      if (cloudCampaign) {
+      const { data: catData } = await supabase.from('catalogs').select('*').eq('id', 'active').maybeSingle();
+      if (catData) {
+        const cloudCampaign = mapRowToCampaign(catData);
         setCampaignConfig((prev) => ({ ...prev, ...cloudCampaign }));
       }
     } catch (err) {
@@ -354,16 +372,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Manual seed or push to cloud
   const syncToCloud = async () => {
-    if (!isSupabaseConfigured()) {
-      showToast('Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env', 'warning');
-      return;
-    }
-
     setIsSyncing(true);
     try {
-      const okProducts = await seedProductsInDb(products);
-      const okCampaign = await saveCampaignConfigInDb(campaignConfig);
-      if (okProducts && okCampaign) {
+      const rows = products.map(mapProductToRow);
+      const { error: prodErr } = await supabase.from('products').upsert(rows, { onConflict: 'id' });
+      const { error: catErr } = await supabase.from('catalogs').upsert(mapCampaignToRow(campaignConfig), { onConflict: 'id' });
+      if (!prodErr && !catErr) {
         setIsCloudSynced(true);
         setSyncStatus('connected');
         showToast('Inventario y catálogos sincronizados en la nube con éxito', 'success');
@@ -432,9 +446,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       };
       setCampaignConfig(newConfig);
-      if (isSupabaseConfigured()) {
-        saveCampaignConfigInDb(newConfig).catch(console.error);
-      }
+      supabase.from('catalogs').upsert(mapCampaignToRow(newConfig), { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('Error updating PDF metadata in cloud:', error);
+      });
       showToast(`PDF de ${brand} guardado con éxito (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
       return true;
     } catch (e) {
@@ -459,9 +473,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       };
       setCampaignConfig(newConfig);
-      if (isSupabaseConfigured()) {
-        saveCampaignConfigInDb(newConfig).catch(console.error);
-      }
+      supabase.from('catalogs').upsert(mapCampaignToRow(newConfig), { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('Error updating PDF deletion in cloud:', error);
+      });
       showToast(`Catálogo PDF de ${brand} eliminado`, 'info');
     } catch (error) {
       console.error('Error deleting PDF file', error);
@@ -576,71 +590,98 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const cartTotalCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
-  // Admin operations
+  // ====================================================================
+  // OPERACIONES CRUD DIRECTAS CON SUPABASE Y ACTUALIZACIÓN INMEDIATA REACT
+  // ====================================================================
+
   const addProduct = async (productData: Omit<Product, 'id'>): Promise<Product | null> => {
+    const id = 'prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
     const newProduct: Product = {
       ...productData,
-      id: 'prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+      id,
     };
 
-    // Optimistic local update
+    // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => [newProduct, ...prev]);
 
-    // Persist to cloud if configured
-    if (isSupabaseConfigured()) {
+    // 2. Realizar la operación directamente en Supabase
+    try {
       setIsSyncing(true);
-      try {
-        const saved = await createProductInDb(newProduct);
-        if (saved) {
-          showToast(`Producto "${newProduct.name}" guardado y sincronizado en la nube`, 'success');
-          return saved;
-        } else {
-          showToast(`Producto guardado en este equipo (sin conexión en la nube)`, 'info');
+      const row = mapProductToRow(newProduct);
+      const { data, error } = await supabase
+        .from('products')
+        .insert(row)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error insertando producto en Supabase:', error);
+        showToast('Guardado local (aviso Supabase: ' + error.message + ')', 'warning');
+      } else {
+        console.log('Producto guardado en Supabase:', data);
+        showToast(`Producto "${newProduct.name}" guardado y sincronizado`, 'success');
+        if (data) {
+          const savedProduct = mapRowToProduct(data);
+          setProducts((prev) => prev.map((p) => (p.id === newProduct.id ? savedProduct : p)));
+          return savedProduct;
         }
-      } catch (err) {
-        console.error('Error persisting product to cloud:', err);
-        showToast('Guardado localmente (error al sincronizar con la nube)', 'warning');
-      } finally {
-        setIsSyncing(false);
       }
-    } else {
-      showToast(`Producto "${newProduct.name}" agregado con éxito (modo local)`, 'success');
+    } catch (err) {
+      console.error('Excepción al insertar en Supabase:', err);
+    } finally {
+      setIsSyncing(false);
     }
 
     return newProduct;
   };
 
   const updateProduct = async (updated: Product): Promise<void> => {
-    // Optimistic local update
+    // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
 
-    // Persist to cloud if configured
-    if (isSupabaseConfigured()) {
-      try {
-        await updateProductInDb(updated);
-      } catch (err) {
-        console.error('Error updating product in cloud:', err);
+    // 2. Realizar la operación directamente en Supabase
+    try {
+      const row = mapProductToRow(updated);
+      const { error } = await supabase
+        .from('products')
+        .update(row)
+        .eq('id', updated.id);
+
+      if (error) {
+        console.error('Error actualizando producto en Supabase:', error);
+        showToast('Error al actualizar en Supabase', 'warning');
+      } else {
+        showToast('Producto actualizado', 'success');
       }
+    } catch (err) {
+      console.error('Excepción al actualizar en Supabase:', err);
     }
-    showToast(`Producto actualizado`, 'success');
   };
 
   const deleteProduct = async (id: string): Promise<void> => {
-    // Optimistic local update
+    // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => prev.filter((p) => p.id !== id));
 
-    // Persist to cloud if configured
-    if (isSupabaseConfigured()) {
-      try {
-        await deleteProductInDb(id);
-      } catch (err) {
-        console.error('Error deleting product from cloud:', err);
+    // 2. Realizar la operación directamente en Supabase
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error eliminando producto en Supabase:', error);
+        showToast('Error al eliminar de Supabase', 'warning');
+      } else {
+        showToast('Producto retirado del catálogo', 'info');
       }
+    } catch (err) {
+      console.error('Excepción al eliminar en Supabase:', err);
     }
-    showToast('Producto retirado del catálogo', 'info');
   };
 
   const clearAllProducts = async (): Promise<void> => {
+    // 1. Actualizar el estado de React inmediatamente
     setProducts([]);
     try {
       localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify([]));
@@ -648,15 +689,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.error(e);
     }
 
-    if (isSupabaseConfigured()) {
-      setIsSyncing(true);
-      try {
-        await clearAllProductsInDb();
-      } catch (err) {
-        console.error('Error clearing products in cloud:', err);
-      } finally {
-        setIsSyncing(false);
+    // 2. Realizar la operación directamente en Supabase
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .neq('id', '___dummy___');
+
+      if (error) {
+        console.error('Error vaciando productos en Supabase:', error);
+      } else {
+        console.log('Productos vaciados en Supabase');
       }
+    } catch (err) {
+      console.error('Excepción al vaciar productos en Supabase:', err);
     }
     showToast('Catálogo vaciado completamente', 'info');
   };
@@ -665,16 +711,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const mergedConfig: CampaignConfig = { ...campaignConfig, ...updated };
     setCampaignConfig(mergedConfig);
 
-    if (isSupabaseConfigured()) {
-      try {
-        await saveCampaignConfigInDb(mergedConfig);
+    try {
+      const row = mapCampaignToRow(mergedConfig);
+      const { error } = await supabase
+        .from('catalogs')
+        .upsert(row, { onConflict: 'id' });
+
+      if (error) {
+        console.error('Error guardando campaña en Supabase:', error);
+      } else {
         showToast('Campaña guardada y sincronizada en la nube', 'success');
-      } catch (err) {
-        console.error('Error saving campaign config in cloud:', err);
-        showToast('Configuración guardada en este equipo', 'info');
       }
-    } else {
-      showToast('Configuración de campaña actualizada', 'success');
+    } catch (err) {
+      console.error('Excepción guardando campaña en Supabase:', err);
     }
   };
 
@@ -686,17 +735,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.removeItem(STORAGE_KEYS.CAMPAIGN);
     localStorage.removeItem(STORAGE_KEYS.CART);
 
-    if (isSupabaseConfigured()) {
-      setIsSyncing(true);
-      try {
-        await clearAllProductsInDb();
-        await seedProductsInDb(initialProducts);
-        await saveCampaignConfigInDb(initialCampaignConfig);
-      } catch (err) {
-        console.error('Error resetting cloud database:', err);
-      } finally {
-        setIsSyncing(false);
-      }
+    setIsSyncing(true);
+    try {
+      await supabase.from('products').delete().neq('id', '___dummy___');
+      const rows = initialProducts.map(mapProductToRow);
+      await supabase.from('products').upsert(rows, { onConflict: 'id' });
+      await supabase.from('catalogs').upsert(mapCampaignToRow(initialCampaignConfig), { onConflict: 'id' });
+      console.log('Productos demo cargados en Supabase');
+    } catch (err) {
+      console.error('Error restableciendo demo en Supabase:', err);
+    } finally {
+      setIsSyncing(false);
     }
     showToast('Datos reiniciados a los valores de prueba', 'info');
   };
@@ -838,6 +887,6 @@ export const useStore = () => {
   return context;
 };
 
-// Aliases for ProductContext & useProducts as requested
+// Aliases for ProductContext & useProducts
 export const ProductContext = StoreContext;
 export const useProducts = useStore;

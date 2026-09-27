@@ -1,29 +1,14 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import type { Product, CampaignConfig, ActiveBrand, ProductCategory } from '../types';
 
-// Environment variables for Supabase
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+export { supabase };
 
 /**
- * Checks if valid Supabase credentials are configured in environment variables.
+ * Checks if Supabase client is available (always true due to configured fallback)
  */
 export const isSupabaseConfigured = (): boolean => {
-  return Boolean(
-    supabaseUrl &&
-    supabaseAnonKey &&
-    supabaseUrl.startsWith('http') &&
-    !supabaseUrl.includes('your-project') &&
-    supabaseAnonKey.length > 20
-  );
+  return Boolean(supabase);
 };
-
-/**
- * Singleton Supabase client instance (or null when not configured)
- */
-export const supabase: SupabaseClient | null = isSupabaseConfigured()
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
-  : null;
 
 // Database row interface for 'products' table
 export interface DbProductRow {
@@ -103,7 +88,7 @@ export const mapRowToProduct = (row: DbProductRow | any): Product => {
  */
 export const mapProductToRow = (product: Product | (Omit<Product, 'id'> & { id?: string })) => {
   return {
-    ...(product.id ? { id: product.id } : {}),
+    id: product.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
     name: product.name,
     brand: product.brand,
     category: product.category,
@@ -164,13 +149,7 @@ export const mapCampaignToRow = (config: CampaignConfig) => {
 // SUPABASE PRODUCTS CRUD SERVICES
 // ==========================================
 
-/**
- * Fetches all products from Supabase 'products' table.
- * Returns null if Supabase is not configured or query fails.
- */
 export const fetchProductsFromDb = async (): Promise<Product[] | null> => {
-  if (!supabase) return null;
-
   try {
     const { data, error } = await supabase
       .from('products')
@@ -182,6 +161,7 @@ export const fetchProductsFromDb = async (): Promise<Product[] | null> => {
       return null;
     }
 
+    console.log('Productos cargados de Supabase:', data?.length);
     if (!data) return [];
     return data.map(mapRowToProduct);
   } catch (err) {
@@ -190,12 +170,7 @@ export const fetchProductsFromDb = async (): Promise<Product[] | null> => {
   }
 };
 
-/**
- * Inserts a new product into Supabase.
- */
 export const createProductInDb = async (product: Product): Promise<Product | null> => {
-  if (!supabase) return null;
-
   try {
     const row = mapProductToRow(product);
     const { data, error } = await supabase
@@ -216,12 +191,7 @@ export const createProductInDb = async (product: Product): Promise<Product | nul
   }
 };
 
-/**
- * Updates an existing product in Supabase.
- */
 export const updateProductInDb = async (product: Product): Promise<Product | null> => {
-  if (!supabase) return null;
-
   try {
     const row = mapProductToRow(product);
     const { data, error } = await supabase
@@ -243,12 +213,7 @@ export const updateProductInDb = async (product: Product): Promise<Product | nul
   }
 };
 
-/**
- * Deletes a product from Supabase by ID.
- */
 export const deleteProductInDb = async (id: string): Promise<boolean> => {
-  if (!supabase) return false;
-
   try {
     const { error } = await supabase
       .from('products')
@@ -267,12 +232,7 @@ export const deleteProductInDb = async (id: string): Promise<boolean> => {
   }
 };
 
-/**
- * Deletes all products in Supabase.
- */
 export const clearAllProductsInDb = async (): Promise<boolean> => {
-  if (!supabase) return false;
-
   try {
     const { error } = await supabase
       .from('products')
@@ -291,11 +251,8 @@ export const clearAllProductsInDb = async (): Promise<boolean> => {
   }
 };
 
-/**
- * Batch seeds products into Supabase (e.g. for initial migration or demo reset).
- */
 export const seedProductsInDb = async (products: Product[]): Promise<boolean> => {
-  if (!supabase || products.length === 0) return false;
+  if (products.length === 0) return false;
 
   try {
     const rows = products.map(mapProductToRow);
@@ -319,12 +276,7 @@ export const seedProductsInDb = async (products: Product[]): Promise<boolean> =>
 // SUPABASE CATALOGS / CAMPAIGN CRUD SERVICES
 // ==========================================
 
-/**
- * Fetches the active campaign and catalog config from Supabase.
- */
 export const fetchCampaignConfigFromDb = async (): Promise<CampaignConfig | null> => {
-  if (!supabase) return null;
-
   try {
     const { data, error } = await supabase
       .from('catalogs')
@@ -345,12 +297,7 @@ export const fetchCampaignConfigFromDb = async (): Promise<CampaignConfig | null
   }
 };
 
-/**
- * Saves or updates campaign and catalog config in Supabase.
- */
 export const saveCampaignConfigInDb = async (config: CampaignConfig): Promise<boolean> => {
-  if (!supabase) return false;
-
   try {
     const row = mapCampaignToRow(config);
     const { error } = await supabase
@@ -373,19 +320,13 @@ export const saveCampaignConfigInDb = async (config: CampaignConfig): Promise<bo
 // REAL-TIME SYNCHRONIZATION HELPERS
 // ==========================================
 
-/**
- * Subscribes to real-time changes in the 'products' table.
- * Calls onInsert, onUpdate, or onDelete when another device (e.g. admin phone) changes products.
- */
 export const subscribeToProductsRealtime = (
   onInsert: (product: Product) => void,
   onUpdate: (product: Product) => void,
   onDelete: (id: string) => void
 ): (() => void) => {
-  if (!supabase) return () => {};
-
   const channel = supabase
-    .channel('lausser-products-realtime')
+    .channel('products-channel')
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'products' },
@@ -422,16 +363,11 @@ export const subscribeToProductsRealtime = (
   };
 };
 
-/**
- * Subscribes to real-time changes in the 'catalogs' table.
- */
 export const subscribeToCatalogsRealtime = (
   onChange: (config: CampaignConfig) => void
 ): (() => void) => {
-  if (!supabase) return () => {};
-
   const channel = supabase
-    .channel('lausser-catalogs-realtime')
+    .channel('catalogs-channel')
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'catalogs' },
