@@ -163,11 +163,34 @@ export const mapCampaignToSettingsRow = (config: CampaignConfig) => {
  * Maps database catalog/campaign_settings row to frontend CampaignConfig
  */
 export const mapRowToCampaign = (row: DbCatalogRow | DbCampaignSettingsRow | any): CampaignConfig => {
+  if (!row) return {
+    campaignNumber: 'C-15 (2026)',
+    closingDate: new Date(Date.now() + 4 * 86400000).toISOString(),
+    whatsappNumber: '573001234567',
+    consultantName: 'Asesoría Lausser',
+    catalogUrls: {
+      ésika: 'https://esika.tiendabelcorp.com.co/catalogo-digital',
+      cyzone: 'https://cyzone.tiendabelcorp.com.co/catalogo-digital',
+      lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
+    },
+    catalogPdfUrls: { ésika: '', cyzone: '', lbel: '' },
+    catalogPdfInfo: {},
+  };
+
   const rawCatalogs = row.catalogs || {};
   const isSettingsFormat = Boolean(row.campaign_name || row.campaign_code || row.end_date || row.catalogs);
 
   const campaignNumber = row.campaign_name || row.campaign_code || row.campaign_number || row.campaignNumber || 'C-15 (2026)';
-  const closingDate = row.end_date || row.closing_date || row.closingDate || new Date(Date.now() + 4 * 86400000).toISOString();
+  
+  // Extraer end_date o closing_date asegurando un string ISO válido
+  const rawDate = row.end_date || row.closing_date || row.closingDate;
+  let closingDate: string;
+  if (rawDate && !isNaN(new Date(rawDate).getTime())) {
+    closingDate = new Date(rawDate).toISOString();
+  } else {
+    closingDate = new Date(Date.now() + 4 * 86400000).toISOString();
+  }
+
   const whatsappNumber = rawCatalogs.whatsappNumber || row.whatsapp_number || row.whatsappNumber || '573001234567';
   const consultantName = rawCatalogs.consultantName || row.consultant_name || row.consultantName || 'Asesoría Lausser';
 
@@ -186,19 +209,40 @@ export const mapRowToCampaign = (row: DbCatalogRow | DbCampaignSettingsRow | any
       }
     : (row.catalog_urls || row.catalogUrls || defaultWeb);
 
-  // PDF catalog URLs (ensuring only valid URLs and not confusing digital catalogs)
+  // PDF catalog URLs (Google Drive, Somos Belcorp, Supabase Storage o enlaces directos)
   const catalogPdfUrls = isSettingsFormat
     ? {
-        ésika: rawCatalogs.pdfUrls?.ésika || rawCatalogs.pdf_urls?.ésika || (typeof rawCatalogs.ésika === 'string' && (rawCatalogs.ésika.endsWith('.pdf') || rawCatalogs.ésika.includes('/pdf')) ? rawCatalogs.ésika : '') || (typeof rawCatalogs.ésika === 'object' ? rawCatalogs.ésika?.pdfUrl : '') || '',
-        cyzone: rawCatalogs.pdfUrls?.cyzone || rawCatalogs.pdf_urls?.cyzone || (typeof rawCatalogs.cyzone === 'string' && (rawCatalogs.cyzone.endsWith('.pdf') || rawCatalogs.cyzone.includes('/pdf')) ? rawCatalogs.cyzone : '') || (typeof rawCatalogs.cyzone === 'object' ? rawCatalogs.cyzone?.pdfUrl : '') || '',
-        lbel: rawCatalogs.pdfUrls?.lbel || rawCatalogs.pdf_urls?.lbel || (typeof rawCatalogs.lbel === 'string' && (rawCatalogs.lbel.endsWith('.pdf') || rawCatalogs.lbel.includes('/pdf')) ? rawCatalogs.lbel : '') || (typeof rawCatalogs.lbel === 'object' ? rawCatalogs.lbel?.pdfUrl : '') || '',
+        ésika: rawCatalogs.pdfUrls?.ésika || rawCatalogs.pdf_urls?.ésika || (typeof rawCatalogs.ésika === 'string' && (rawCatalogs.ésika.includes('drive.google.com') || rawCatalogs.ésika.endsWith('.pdf') || rawCatalogs.ésika.includes('/pdf') || rawCatalogs.ésika.includes('storage') || rawCatalogs.ésika.includes('belcorp')) ? rawCatalogs.ésika : '') || (typeof rawCatalogs.ésika === 'object' ? rawCatalogs.ésika?.pdfUrl : '') || '',
+        cyzone: rawCatalogs.pdfUrls?.cyzone || rawCatalogs.pdf_urls?.cyzone || (typeof rawCatalogs.cyzone === 'string' && (rawCatalogs.cyzone.includes('drive.google.com') || rawCatalogs.cyzone.endsWith('.pdf') || rawCatalogs.cyzone.includes('/pdf') || rawCatalogs.cyzone.includes('storage') || rawCatalogs.cyzone.includes('belcorp')) ? rawCatalogs.cyzone : '') || (typeof rawCatalogs.cyzone === 'object' ? rawCatalogs.cyzone?.pdfUrl : '') || '',
+        lbel: rawCatalogs.pdfUrls?.lbel || rawCatalogs.pdf_urls?.lbel || (typeof rawCatalogs.lbel === 'string' && (rawCatalogs.lbel.includes('drive.google.com') || rawCatalogs.lbel.endsWith('.pdf') || rawCatalogs.lbel.includes('/pdf') || rawCatalogs.lbel.includes('storage') || rawCatalogs.lbel.includes('belcorp')) ? rawCatalogs.lbel : '') || (typeof rawCatalogs.lbel === 'object' ? rawCatalogs.lbel?.pdfUrl : '') || '',
       }
     : (row.catalog_pdf_urls || row.catalogPdfUrls || { ésika: '', cyzone: '', lbel: '' });
 
   // PDF metadata
-  const catalogPdfInfo = isSettingsFormat
-    ? (rawCatalogs.pdfInfo || rawCatalogs.pdf_info || undefined)
-    : (row.catalog_pdf_info || row.catalogPdfInfo || undefined);
+  const rawPdfInfo = isSettingsFormat
+    ? (rawCatalogs.pdfInfo || rawCatalogs.pdf_info || {})
+    : (row.catalog_pdf_info || row.catalogPdfInfo || {});
+
+  const catalogPdfInfo: CampaignConfig['catalogPdfInfo'] = {
+    ésika: rawPdfInfo.ésika || (catalogPdfUrls.ésika ? {
+      fileName: catalogPdfUrls.ésika.split('/').pop()?.split('?')[0] || 'catalogo-ésika.pdf',
+      fileSize: 0,
+      updatedAt: row.updated_at || new Date().toISOString(),
+      isUploaded: true,
+    } : null),
+    cyzone: rawPdfInfo.cyzone || (catalogPdfUrls.cyzone ? {
+      fileName: catalogPdfUrls.cyzone.split('/').pop()?.split('?')[0] || 'catalogo-cyzone.pdf',
+      fileSize: 0,
+      updatedAt: row.updated_at || new Date().toISOString(),
+      isUploaded: true,
+    } : null),
+    lbel: rawPdfInfo.lbel || (catalogPdfUrls.lbel ? {
+      fileName: catalogPdfUrls.lbel.split('/').pop()?.split('?')[0] || 'catalogo-lbel.pdf',
+      fileSize: 0,
+      updatedAt: row.updated_at || new Date().toISOString(),
+      isUploaded: true,
+    } : null),
+  };
 
   return {
     campaignNumber,

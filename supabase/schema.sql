@@ -229,3 +229,32 @@ VALUES
   ('lbl-04', 'Base Clarifiant FPS 30 Tratamiento Antiedad L''Bel', 'lbel', 'maquillaje', '04910', 88000, 59900, 5, 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=700&q=80', 'Base de alta cobertura con acabado mate aterciopelado que aclara manchas progresivamente con FPS 30.', 4.8, false, '30 ml - Clair 2'),
   ('lbl-05', 'Perfume Bleu Intense Masculino L''Bel 100ml', 'lbel', 'perfumeria', '17202', 155000, 105000, 3, 'https://images.unsplash.com/photo-1594035910387-fea47794261f?auto=format&fit=crop&w=700&q=80', 'Inspirado en la fuerza del mar. Aroma herbal acuático con notas de salvia francesa y vetiver de Haití.', 4.9, false, '100 ml')
 ON CONFLICT (id) DO NOTHING;
+
+-- ==============================================================================
+-- 8. STORAGE: BUCKET 'catalogs' PARA REVISTAS Y CATÁLOGOS PDF
+-- ==============================================================================
+-- Crea el bucket público 'catalogs' si no existe
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('catalogs', 'catalogs', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Política de lectura pública para el bucket catalogs
+DROP POLICY IF EXISTS "Public access to view catalogs" ON storage.objects;
+CREATE POLICY "Public access to view catalogs"
+  ON storage.objects FOR SELECT
+  TO anon, authenticated
+  USING (bucket_id = 'catalogs');
+
+-- Políticas de inserción y modificación para el bucket catalogs
+DROP POLICY IF EXISTS "Allow upload to catalogs bucket" ON storage.objects;
+CREATE POLICY "Allow upload to catalogs bucket"
+  ON storage.objects FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (bucket_id = 'catalogs');
+
+DROP POLICY IF EXISTS "Allow update and delete in catalogs bucket" ON storage.objects;
+CREATE POLICY "Allow update and delete in catalogs bucket"
+  ON storage.objects FOR ALL
+  TO anon, authenticated
+  USING (bucket_id = 'catalogs');
+

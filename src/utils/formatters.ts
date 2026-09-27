@@ -30,17 +30,41 @@ export const formatCurrency = (amount: number): string => {
   return `$ ${formatted} COP`;
 };
 
-// Formateador de fecha amigable en español
+// Formateador para input type="datetime-local" (YYYY-MM-DDTHH:mm) sin desfase de zona horaria
+export const formatToDateTimeLocal = (dateString?: string): string => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+// Convierte el valor de input type="datetime-local" a string ISO UTC válido
+export const parseDateTimeLocalToIso = (localString: string): string => {
+  if (!localString) return new Date().toISOString();
+  const date = new Date(localString);
+  if (isNaN(date.getTime())) return new Date().toISOString();
+  return date.toISOString();
+};
+
+// Formateador de fecha amigable en español (Colombia)
 export const formatDateFriendly = (dateString: string): string => {
   try {
     const date = new Date(dateString);
-    return new Intl.DateTimeFormat('es-ES', {
+    if (isNaN(date.getTime())) return dateString;
+    return new Intl.DateTimeFormat('es-CO', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      hour12: true,
     }).format(date);
   } catch {
     return dateString;

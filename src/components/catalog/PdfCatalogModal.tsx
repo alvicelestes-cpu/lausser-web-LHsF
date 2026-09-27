@@ -53,6 +53,7 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hasNoPdf, setHasNoPdf] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [googleDriveEmbedUrl, setGoogleDriveEmbedUrl] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const modalContainerRef = useRef<HTMLDivElement | null>(null);
@@ -71,6 +72,7 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
     setErrorMessage(null);
     setHasNoPdf(false);
     setPdfDoc(null);
+    setGoogleDriveEmbedUrl(null);
     setCurrentPage(1);
     setPageInput('1');
     setZoomScale(1.0);
@@ -78,22 +80,33 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
     const loadDocument = async () => {
       try {
         let pdfSource: string | ArrayBuffer | null = null;
+        const configuredUrl = campaignConfig.catalogPdfUrls?.[brand]?.trim();
 
-        // First check IndexedDB
-        const storedBlob = await getCatalogPdf(brand);
-        if (storedBlob) {
-          pdfSource = await storedBlob.arrayBuffer();
-        } else {
-          // Check campaignConfig direct URL
-          const configuredUrl = campaignConfig.catalogPdfUrls?.[brand];
+        if (configuredUrl) {
+          // Detectar si es un enlace de Google Drive para previsualizarlo en iframe
+          const driveMatch = configuredUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || configuredUrl.match(/id=([a-zA-Z0-9_-]+)/);
+          if (driveMatch && driveMatch[1]) {
+            if (!isCancelled) {
+              setGoogleDriveEmbedUrl(`https://drive.google.com/file/d/${driveMatch[1]}/preview`);
+              setIsLoading(false);
+            }
+            return;
+          }
+
           if (
-            configuredUrl &&
-            configuredUrl.trim() &&
-            (configuredUrl.endsWith('.pdf') || configuredUrl.includes('/pdf') || configuredUrl.startsWith('http') || configuredUrl.startsWith('blob:')) &&
-            !configuredUrl.includes('tiendabelcorp.com.co') &&
-            !configuredUrl.includes('somosbelcorp.com')
+            configuredUrl.startsWith('http://') ||
+            configuredUrl.startsWith('https://') ||
+            configuredUrl.startsWith('blob:')
           ) {
-            pdfSource = configuredUrl.trim();
+            pdfSource = configuredUrl;
+          }
+        }
+
+        // Si no hay URL configurada, verificar si hay PDF en almacenamiento local
+        if (!pdfSource) {
+          const storedBlob = await getCatalogPdf(brand);
+          if (storedBlob) {
+            pdfSource = await storedBlob.arrayBuffer();
           }
         }
 
@@ -121,7 +134,7 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
         console.error('Error loading PDF document:', err);
         if (!isCancelled) {
           setErrorMessage(
-            'No se pudo cargar el archivo PDF. Si es una URL externa, verifica los permisos CORS o sube el archivo directamente en el Panel de Administración.'
+            'El visor interactivo no pudo cargar directamente el archivo (puede deberse a restricciones de acceso o CORS del servidor externo). Puedes abrir el catálogo directamente con el botón a continuación:'
           );
           setIsLoading(false);
         }
@@ -497,11 +510,21 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
             <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center mx-auto">
               <AlertCircle className="w-6 h-6" />
             </div>
-            <h4 className="font-bold text-base">Error al abrir la revista</h4>
+            <h4 className="font-bold text-base">Visor de Revista Digital</h4>
             <p className="text-xs text-neutral-400 leading-relaxed">
               {errorMessage}
             </p>
             <div className="pt-2 flex flex-col gap-2">
+              {campaignConfig.catalogPdfUrls?.[brand] && (
+                <a
+                  href={campaignConfig.catalogPdfUrls[brand]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-rose-400 font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>Abrir enlace del PDF en pestaña nueva ↗</span>
+                </a>
+              )}
               <button
                 onClick={() => onOpenOrderModal(brand)}
                 className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors"
@@ -518,8 +541,32 @@ export const PdfCatalogModal: React.FC<PdfCatalogModalProps> = ({
           </div>
         )}
 
+        {/* Google Drive Preview Iframe */}
+        {!isLoading && googleDriveEmbedUrl && (
+          <div className="w-full h-full max-w-5xl flex flex-col items-center justify-center p-2 sm:p-4">
+            <div className="w-full h-[78vh] bg-white rounded-2xl overflow-hidden shadow-2xl border border-neutral-800">
+              <iframe
+                src={googleDriveEmbedUrl}
+                title={`Catálogo Google Drive ${brandName}`}
+                className="w-full h-full border-0"
+                allow="autoplay"
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-center gap-3">
+              <a
+                href={campaignConfig.catalogPdfUrls?.[brand] || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-rose-400 hover:underline font-semibold"
+              >
+                Abrir en pestaña nueva ↗
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Rendered PDF Page Canvas */}
-        {!isLoading && !hasNoPdf && !errorMessage && (
+        {!isLoading && !hasNoPdf && !errorMessage && !googleDriveEmbedUrl && (
           <div className="relative flex items-center justify-center">
             {isPageRendering && (
               <div className="absolute inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center z-10 rounded-2xl">

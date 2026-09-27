@@ -9,7 +9,7 @@ import type {
   ActiveBrand
 } from '../types';
 import { initialProducts, initialCampaignConfig } from '../data/mockData';
-import { saveCatalogPdf, deleteCatalogPdf, getAllCatalogPdfInfo } from '../utils/pdfStorage';
+import { saveCatalogPdf, deleteCatalogPdf } from '../utils/pdfStorage';
 import { supabase } from '../lib/supabase';
 import {
   mapRowToProduct,
@@ -66,7 +66,7 @@ export interface StoreContextType {
   openPdfViewer: (brand: ActiveBrand) => void;
   magazineOrderPrefill: { brand?: ActiveBrand; page?: string } | null;
   openMagazineOrderWithPrefill: (brand: ActiveBrand, page?: string) => void;
-  uploadCatalogPdf: (brand: ActiveBrand, file: File) => Promise<boolean>;
+  uploadCatalogPdf: (brand: ActiveBrand, file: File) => Promise<string | null>;
   deleteCatalogPdfFile: (brand: ActiveBrand) => Promise<void>;
   
   // Cart Actions
@@ -83,6 +83,7 @@ export interface StoreContextType {
   deleteProduct: (id: string) => Promise<void>;
   clearAllProducts: () => Promise<void>;
   updateCampaignConfig: (config: Partial<CampaignConfig>) => Promise<void>;
+  setCampaignConfig: React.Dispatch<React.SetStateAction<CampaignConfig>>;
   resetToDefaults: () => Promise<void>;
   
   // Admin Authentication & Security
@@ -273,29 +274,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         // 1. Consulta Supabase en 'campaign_settings' según requerimiento
-        const { data, error } = await supabase
+        const { data: campSettings, error: campError } = await supabase
           .from('campaign_settings')
           .select('*')
           .eq('id', 'current_campaign')
           .single();
 
-        if (data && !error && isMounted) {
-          const cloudCampaign = mapRowToCampaign(data);
-          setCampaignConfig((prev) => {
-            const updated = {
-              ...prev,
-              ...cloudCampaign,
-              catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
-              catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
-              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
-            };
-            try {
-              localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
-            } catch (e) {
-              console.error(e);
-            }
-            return updated;
-          });
+        if (campSettings && !campError && isMounted) {
+          const cloudCampaign = mapRowToCampaign(campSettings);
+          console.log('Campaña y fecha de cierre cargadas de Supabase campaign_settings:', cloudCampaign);
+          setCampaignConfig(cloudCampaign);
+          try {
+            localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(cloudCampaign));
+          } catch (e) {
+            console.error(e);
+          }
         } else {
           // 2. Fallback a tabla 'catalogs'
           const { data: catData, error: catError } = await supabase
@@ -306,21 +299,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           if (!catError && catData && isMounted) {
             const cloudCampaign = mapRowToCampaign(catData);
-            setCampaignConfig((prev) => {
-              const updated = {
-                ...prev,
-                ...cloudCampaign,
-                catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
-                catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
-                catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
-              };
-              try {
-                localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
-              } catch (e) {
-                console.error(e);
-              }
-              return updated;
-            });
+            console.log('Campaña y fecha de cierre cargadas de Supabase catalogs (fallback):', cloudCampaign);
+            setCampaignConfig(cloudCampaign);
+            try {
+              localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(cloudCampaign));
+            } catch (e) {
+              console.error(e);
+            }
           }
         }
       } catch (err) {
@@ -373,13 +358,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         (payload) => {
           if (payload.new) {
             const config = mapRowToCampaign(payload.new as DbCatalogRow);
-            setCampaignConfig((prev) => ({
-              ...prev,
-              ...config,
-              catalogUrls: { ...prev.catalogUrls, ...config.catalogUrls },
-              catalogPdfUrls: { ...prev.catalogPdfUrls, ...config.catalogPdfUrls },
-              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(config.catalogPdfInfo || {}) },
-            }));
+            setCampaignConfig(config);
+            try {
+              localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(config));
+            } catch (e) {
+              console.error(e);
+            }
           }
         }
       )
@@ -393,13 +377,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         (payload) => {
           if (payload.new) {
             const config = mapRowToCampaign(payload.new as DbCampaignSettingsRow);
-            setCampaignConfig((prev) => ({
-              ...prev,
-              ...config,
-              catalogUrls: { ...prev.catalogUrls, ...config.catalogUrls },
-              catalogPdfUrls: { ...prev.catalogPdfUrls, ...config.catalogPdfUrls },
-              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(config.catalogPdfInfo || {}) },
-            }));
+            setCampaignConfig(config);
+            try {
+              localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(config));
+            } catch (e) {
+              console.error(e);
+            }
           }
         }
       )
@@ -438,24 +421,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (campData) {
         const cloudCampaign = mapRowToCampaign(campData);
-        setCampaignConfig((prev) => ({
-          ...prev,
-          ...cloudCampaign,
-          catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
-          catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
-          catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
-        }));
+        setCampaignConfig(cloudCampaign);
+        localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(cloudCampaign));
       } else {
         const { data: catData } = await supabase.from('catalogs').select('*').eq('id', 'active').maybeSingle();
         if (catData) {
           const cloudCampaign = mapRowToCampaign(catData);
-          setCampaignConfig((prev) => ({
-            ...prev,
-            ...cloudCampaign,
-            catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
-            catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
-            catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
-          }));
+          setCampaignConfig(cloudCampaign);
+          localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(cloudCampaign));
         }
       }
     } catch (err) {
@@ -508,56 +481,65 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsMagazineOrderOpen(true);
   };
 
-  // Sync IndexedDB files metadata with campaignConfig on mount
-  useEffect(() => {
-    getAllCatalogPdfInfo().then((infoMap) => {
-      setCampaignConfig((prev) => {
-        let changed = false;
-        const newInfo = { ...(prev.catalogPdfInfo || {}) };
-        for (const b of ['ésika', 'cyzone', 'lbel'] as ActiveBrand[]) {
-          if (infoMap[b]) {
-            const meta = infoMap[b]!;
-            if (!newInfo[b] || newInfo[b]?.fileName !== meta.fileName || newInfo[b]?.fileSize !== meta.fileSize) {
-              newInfo[b] = {
-                fileName: meta.fileName,
-                fileSize: meta.fileSize,
-                updatedAt: meta.updatedAt,
-                isUploaded: true,
-              };
-              changed = true;
-            }
-          }
-        }
-        return changed ? { ...prev, catalogPdfInfo: newInfo } : prev;
-      });
-    }).catch((err) => {
-      console.warn('Error reading stored PDF info:', err);
-    });
-  }, []);
-
-  const uploadCatalogPdf = async (brand: ActiveBrand, file: File): Promise<boolean> => {
+  const uploadCatalogPdf = async (brand: ActiveBrand, file: File): Promise<string | null> => {
     try {
-      const meta = await saveCatalogPdf(brand, file);
+      setIsSyncing(true);
+      // 1. Guardar en almacenamiento local IndexedDB como respaldo local
+      await saveCatalogPdf(brand, file, file.name);
+
+      // 2. Intentar subir al bucket 'catalogs' de Supabase Storage
+      let publicUrl = '';
+      try {
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const timestamp = Date.now();
+        const storagePath = `${brand}/${timestamp}_${cleanFileName}`;
+
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('catalogs')
+          .upload(storagePath, file, {
+            cacheControl: '3600',
+            upsert: true,
+            contentType: 'application/pdf',
+          });
+
+        if (uploadErr) {
+          console.warn('Aviso: No se pudo subir a Supabase Storage bucket "catalogs":', uploadErr.message);
+        } else if (uploadData) {
+          const { data: urlData } = supabase.storage.from('catalogs').getPublicUrl(storagePath);
+          publicUrl = urlData.publicUrl;
+          console.log(`URL pública generada para ${brand}:`, publicUrl);
+        }
+      } catch (storageException) {
+        console.warn('Excepción en storage upload:', storageException);
+      }
+
       const newConfig: CampaignConfig = {
         ...campaignConfig,
+        catalogPdfUrls: {
+          ...campaignConfig.catalogPdfUrls,
+          [brand]: publicUrl || campaignConfig.catalogPdfUrls?.[brand] || '',
+        },
         catalogPdfInfo: {
           ...campaignConfig.catalogPdfInfo,
           [brand]: {
-            fileName: meta.fileName,
-            fileSize: meta.fileSize,
-            updatedAt: meta.updatedAt,
+            fileName: file.name,
+            fileSize: file.size,
+            updatedAt: new Date().toISOString(),
             isUploaded: true,
           },
         },
       };
+
       setCampaignConfig(newConfig);
       await updateCampaignConfig(newConfig);
-      showToast(`PDF de ${brand} guardado con éxito (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
-      return true;
+      showToast(`PDF de ${brand} procesado (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
+      return publicUrl || null;
     } catch (e) {
-      console.error('Error saving PDF file', e);
-      showToast(`Error al guardar el archivo PDF de ${brand}`, 'warning');
-      return false;
+      console.error('Error procesando archivo PDF', e);
+      showToast(`Error al procesar el archivo PDF de ${brand}`, 'warning');
+      return null;
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -579,7 +561,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await updateCampaignConfig(newConfig);
       showToast(`Catálogo PDF de ${brand} eliminado`, 'info');
     } catch (error) {
-      console.error('Error deleting PDF file', error);
+      console.error('Error eliminando archivo PDF', error);
     }
   };
 
@@ -1005,6 +987,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteProduct,
         clearAllProducts,
         updateCampaignConfig,
+        setCampaignConfig,
         resetToDefaults,
         isAdminAuthenticated,
         isAdminLoginOpen,

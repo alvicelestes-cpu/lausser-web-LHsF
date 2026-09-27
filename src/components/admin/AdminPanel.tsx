@@ -28,8 +28,9 @@ import {
   Database
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import type { ActiveBrand, ProductCategory } from '../../types';
-import { formatCurrency, getBrandTheme, parseCOP } from '../../utils/formatters';
+import type { ActiveBrand, ProductCategory, CampaignConfig } from '../../types';
+import { formatCurrency, getBrandTheme, parseCOP, formatToDateTimeLocal, parseDateTimeLocalToIso } from '../../utils/formatters';
+import { supabase } from '../../lib/supabase';
 
 export const AdminPanel: React.FC = () => {
   const { 
@@ -39,7 +40,7 @@ export const AdminPanel: React.FC = () => {
     clearAllProducts,
     updateProduct,
     campaignConfig, 
-    updateCampaignConfig,
+    setCampaignConfig,
     resetToDefaults,
     setCurrentTab,
     logoutAdmin,
@@ -187,14 +188,7 @@ export const AdminPanel: React.FC = () => {
 
   // Campaign config form state
   const [campaignNumber, setCampaignNumber] = useState(campaignConfig.campaignNumber);
-  const [closingDate, setClosingDate] = useState(() => {
-    try {
-      const d = new Date(campaignConfig.closingDate);
-      return d.toISOString().slice(0, 16);
-    } catch {
-      return '';
-    }
-  });
+  const [closingDate, setClosingDate] = useState(() => formatToDateTimeLocal(campaignConfig.closingDate));
   const [whatsappNumber, setWhatsappNumber] = useState(campaignConfig.whatsappNumber);
   const [consultantName, setConsultantName] = useState(campaignConfig.consultantName);
   const [esikaUrl, setEsikaUrl] = useState(campaignConfig.catalogUrls?.ésika || OFFICIAL_CATALOG_URLS.ésika);
@@ -204,17 +198,19 @@ export const AdminPanel: React.FC = () => {
   // Sync state whenever campaignConfig changes in context
   useEffect(() => {
     setCampaignNumber(campaignConfig.campaignNumber);
-    try {
-      const d = new Date(campaignConfig.closingDate);
-      setClosingDate(d.toISOString().slice(0, 16));
-    } catch {
-      // ignore
+    if (campaignConfig.closingDate) {
+      setClosingDate(formatToDateTimeLocal(campaignConfig.closingDate));
     }
     setWhatsappNumber(campaignConfig.whatsappNumber);
     setConsultantName(campaignConfig.consultantName);
     setEsikaUrl(campaignConfig.catalogUrls?.ésika || OFFICIAL_CATALOG_URLS.ésika);
     setCyzoneUrl(campaignConfig.catalogUrls?.cyzone || OFFICIAL_CATALOG_URLS.cyzone);
     setLbelUrl(campaignConfig.catalogUrls?.lbel || OFFICIAL_CATALOG_URLS.lbel);
+    setPdfUrlInputs({
+      ésika: campaignConfig.catalogPdfUrls?.ésika || '',
+      cyzone: campaignConfig.catalogPdfUrls?.cyzone || '',
+      lbel: campaignConfig.catalogPdfUrls?.lbel || '',
+    });
   }, [campaignConfig]);
 
   // PDF Catalog Management states
@@ -225,14 +221,6 @@ export const AdminPanel: React.FC = () => {
     lbel: campaignConfig.catalogPdfUrls?.lbel || '',
   });
 
-  useEffect(() => {
-    setPdfUrlInputs({
-      ésika: campaignConfig.catalogPdfUrls?.ésika || '',
-      cyzone: campaignConfig.catalogPdfUrls?.cyzone || '',
-      lbel: campaignConfig.catalogPdfUrls?.lbel || '',
-    });
-  }, [campaignConfig.catalogPdfUrls]);
-
   const handlePdfFileUpload = async (brandToUpload: ActiveBrand, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -242,7 +230,140 @@ export const AdminPanel: React.FC = () => {
     }
     setUploadingBrand(brandToUpload);
     try {
-      await uploadCatalogPdf(brandToUpload, file);
+      // 1. Sanitizar el nombre del archivo
+      const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const timestamp = Date.now();
+      const storagePath = `${brandToUpload}/${timestamp}_${cleanFileName}`;
+
+      // 2. Subir al bucket 'catalogs' de Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('catalogs')
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: 'application/pdf',
+        });
+
+      if (uploadError) {
+        console.warn('Error al subir PDF a Supabase Storage (bucket catalogs):', uploadError);
+        alert(
+          `Aviso de Supabase Storage: No se pudo subir el archivo al bucket "catalogs" (${uploadError.message}).\n\n` +
+          `Para que el PDF esté disponible globalmente en todos los celulares y dispositivos, por favor ingresa un enlace / URL pública directa (ej. enlace público de Google Drive, Cloudinary o enlace de Somos Belcorp) en la Opción 2.`
+        );
+        // Guardar en almacenamiento local como respaldo
+        await uploadCatalogPdf(brandToUpload, file);
+        return;
+      }
+
+      if (uploadData) {
+        // 3. Obtener URL pública
+        const { data: urlData } = supabase.storage
+          .from('catalogs')
+          .getPublicUrl(storagePath);
+
+        const publicUrl = urlData.publicUrl;
+        console.log(`PDF de ${brandToUpload} subido a Supabase Storage:`, publicUrl);
+
+        setPdfUrlInputs((prev) => ({
+          ...prev,
+          [brandToUpload]: publicUrl,
+        }));
+
+        const currentPdfUrls = {
+          ...campaignConfig.catalogPdfUrls,
+          [brandToUpload]: publicUrl,
+        };
+
+        const updatedPdfInfo = {
+          ...campaignConfig.catalogPdfInfo,
+          [brandToUpload]: {
+            fileName: file.name,
+            fileSize: file.size,
+            updatedAt: new Date().toISOString(),
+            isUploaded: true,
+          },
+        };
+
+        const campaignName = campaignNumber.trim() || campaignConfig.campaignNumber || 'Campaña C-15 (2026)';
+        const codeMatch = campaignName.match(/C-\d+/i);
+        const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+        const isoClosingDate = parseDateTimeLocalToIso(closingDate);
+
+        const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
+        const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
+        const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
+
+        const catalogLinksAndPdfs = {
+          ésika: currentPdfUrls.ésika || safeEsikaUrl,
+          cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
+          lbel: currentPdfUrls.lbel || safeLbelUrl,
+          pdfUrls: currentPdfUrls,
+          catalogUrls: {
+            ésika: safeEsikaUrl,
+            cyzone: safeCyzoneUrl,
+            lbel: safeLbelUrl,
+          },
+          pdfInfo: updatedPdfInfo,
+          whatsappNumber: whatsappNumber.trim(),
+          consultantName: consultantName.trim(),
+        };
+
+        const campaignPayload = {
+          id: 'current_campaign',
+          campaign_name: campaignName,
+          campaign_code: campaignCode,
+          end_date: isoClosingDate,
+          catalogs: catalogLinksAndPdfs,
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: saveError } = await supabase.from('campaign_settings').upsert(campaignPayload);
+        if (saveError) {
+          console.error('Error al guardar en campaign_settings:', saveError);
+          alert('Error al guardar configuración: ' + saveError.message);
+        } else {
+          try {
+            await supabase.from('catalogs').upsert({
+              id: 'active',
+              campaign_number: campaignName,
+              closing_date: isoClosingDate,
+              whatsapp_number: whatsappNumber.trim(),
+              consultant_name: consultantName.trim(),
+              catalog_urls: catalogLinksAndPdfs.catalogUrls,
+              catalog_pdf_urls: currentPdfUrls,
+              catalog_pdf_info: updatedPdfInfo,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
+          } catch (e) {
+            console.warn(e);
+          }
+
+          const updatedCampaign: CampaignConfig = {
+            campaignNumber: campaignName,
+            closingDate: isoClosingDate,
+            whatsappNumber: whatsappNumber.trim(),
+            consultantName: consultantName.trim(),
+            catalogUrls: catalogLinksAndPdfs.catalogUrls,
+            catalogPdfUrls: currentPdfUrls,
+            catalogPdfInfo: updatedPdfInfo,
+          };
+
+          // Guardar también en almacenamiento local como respaldo
+          await uploadCatalogPdf(brandToUpload, file);
+
+          setCampaignConfig(updatedCampaign);
+          try {
+            localStorage.setItem('lausser_campaign_v1', JSON.stringify(updatedCampaign));
+          } catch (e) {
+            console.error(e);
+          }
+
+          alert(`¡PDF de ${brandToUpload} subido a Supabase Storage y disponible en todos los dispositivos!`);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error en upload:', err);
+      alert('Error al procesar el archivo PDF: ' + (err?.message || err));
     } finally {
       setUploadingBrand(null);
       e.target.value = '';
@@ -251,23 +372,169 @@ export const AdminPanel: React.FC = () => {
 
   const handleSavePdfUrl = async (brandToSave: ActiveBrand) => {
     const url = (pdfUrlInputs[brandToSave] || '').trim();
-    await updateCampaignConfig({
-      catalogPdfUrls: {
-        ...campaignConfig.catalogPdfUrls,
-        [brandToSave]: url,
+
+    const currentPdfUrls = {
+      ...campaignConfig.catalogPdfUrls,
+      [brandToSave]: url,
+    };
+
+    const updatedPdfInfo = {
+      ...campaignConfig.catalogPdfInfo,
+      [brandToSave]: url
+        ? {
+            fileName: url.split('/').pop()?.split('?')[0] || `catalogo-${brandToSave}.pdf`,
+            fileSize: 0,
+            updatedAt: new Date().toISOString(),
+            isUploaded: true,
+          }
+        : null,
+    };
+
+    const campaignName = campaignNumber.trim() || campaignConfig.campaignNumber || 'Campaña C-15 (2026)';
+    const codeMatch = campaignName.match(/C-\d+/i);
+    const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+    const isoClosingDate = parseDateTimeLocalToIso(closingDate);
+
+    const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
+    const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
+    const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
+
+    const catalogLinksAndPdfs = {
+      ésika: currentPdfUrls.ésika || safeEsikaUrl,
+      cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
+      lbel: currentPdfUrls.lbel || safeLbelUrl,
+      pdfUrls: currentPdfUrls,
+      catalogUrls: {
+        ésika: safeEsikaUrl,
+        cyzone: safeCyzoneUrl,
+        lbel: safeLbelUrl,
       },
-      catalogPdfInfo: {
-        ...campaignConfig.catalogPdfInfo,
-        [brandToSave]: url
-          ? {
-              fileName: url.split('/').pop()?.split('?')[0] || `catalogo-${brandToSave}.pdf`,
-              fileSize: 0,
-              updatedAt: new Date().toISOString(),
-              isUploaded: false,
-            }
-          : null,
+      pdfInfo: updatedPdfInfo,
+      whatsappNumber: whatsappNumber.trim(),
+      consultantName: consultantName.trim(),
+    };
+
+    const campaignPayload = {
+      id: 'current_campaign',
+      campaign_name: campaignName,
+      campaign_code: campaignCode,
+      end_date: isoClosingDate,
+      catalogs: catalogLinksAndPdfs,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error: upsertErr } = await supabase.from('campaign_settings').upsert(campaignPayload);
+    if (upsertErr) {
+      console.error('Error al guardar URL de PDF en Supabase:', upsertErr);
+      alert('Error al guardar URL: ' + upsertErr.message);
+    } else {
+      try {
+        await supabase.from('catalogs').upsert({
+          id: 'active',
+          campaign_number: campaignName,
+          closing_date: isoClosingDate,
+          whatsapp_number: whatsappNumber.trim(),
+          consultant_name: consultantName.trim(),
+          catalog_urls: catalogLinksAndPdfs.catalogUrls,
+          catalog_pdf_urls: currentPdfUrls,
+          catalog_pdf_info: updatedPdfInfo,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      } catch (e) {
+        console.warn(e);
+      }
+
+      const updatedCampaign: CampaignConfig = {
+        campaignNumber: campaignName,
+        closingDate: isoClosingDate,
+        whatsappNumber: whatsappNumber.trim(),
+        consultantName: consultantName.trim(),
+        catalogUrls: catalogLinksAndPdfs.catalogUrls,
+        catalogPdfUrls: currentPdfUrls,
+        catalogPdfInfo: updatedPdfInfo,
+      };
+
+      setCampaignConfig(updatedCampaign);
+      try {
+        localStorage.setItem('lausser_campaign_v1', JSON.stringify(updatedCampaign));
+      } catch (e) {
+        console.error(e);
+      }
+
+      alert(`¡Enlace de Revista ${brandToSave} guardado y disponible para todos los celulares!`);
+    }
+  };
+
+  const handleDeletePdf = async (brandToDelete: ActiveBrand) => {
+    if (!window.confirm(`¿Estás segura de eliminar la revista PDF de ${brandToDelete}?`)) {
+      return;
+    }
+
+    setPdfUrlInputs((prev) => ({
+      ...prev,
+      [brandToDelete]: '',
+    }));
+
+    const currentPdfUrls = {
+      ...campaignConfig.catalogPdfUrls,
+      [brandToDelete]: '',
+    };
+
+    const updatedPdfInfo = {
+      ...campaignConfig.catalogPdfInfo,
+      [brandToDelete]: null,
+    };
+
+    const campaignName = campaignNumber.trim() || campaignConfig.campaignNumber || 'Campaña C-15 (2026)';
+    const codeMatch = campaignName.match(/C-\d+/i);
+    const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+    const isoClosingDate = parseDateTimeLocalToIso(closingDate);
+
+    const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
+    const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
+    const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
+
+    const catalogLinksAndPdfs = {
+      ésika: currentPdfUrls.ésika || safeEsikaUrl,
+      cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
+      lbel: currentPdfUrls.lbel || safeLbelUrl,
+      pdfUrls: currentPdfUrls,
+      catalogUrls: {
+        ésika: safeEsikaUrl,
+        cyzone: safeCyzoneUrl,
+        lbel: safeLbelUrl,
       },
+      pdfInfo: updatedPdfInfo,
+      whatsappNumber: whatsappNumber.trim(),
+      consultantName: consultantName.trim(),
+    };
+
+    await supabase.from('campaign_settings').upsert({
+      id: 'current_campaign',
+      campaign_name: campaignName,
+      campaign_code: campaignCode,
+      end_date: isoClosingDate,
+      catalogs: catalogLinksAndPdfs,
+      updated_at: new Date().toISOString()
     });
+
+    try {
+      await supabase.from('catalogs').upsert({
+        id: 'active',
+        campaign_number: campaignName,
+        closing_date: isoClosingDate,
+        whatsapp_number: whatsappNumber.trim(),
+        consultant_name: consultantName.trim(),
+        catalog_urls: catalogLinksAndPdfs.catalogUrls,
+        catalog_pdf_urls: currentPdfUrls,
+        catalog_pdf_info: updatedPdfInfo,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    } catch (e) {
+      console.warn(e);
+    }
+
+    await deleteCatalogPdfFile(brandToDelete);
   };
 
   const handleProductSubmit = (e: React.FormEvent) => {
@@ -326,37 +593,96 @@ export const AdminPanel: React.FC = () => {
     const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
 
     const currentPdfUrls = {
-      ésika: (pdfUrlInputs.ésika || '').trim() || campaignConfig.catalogPdfUrls?.ésika || '',
-      cyzone: (pdfUrlInputs.cyzone || '').trim() || campaignConfig.catalogPdfUrls?.cyzone || '',
-      lbel: (pdfUrlInputs.lbel || '').trim() || campaignConfig.catalogPdfUrls?.lbel || '',
+      ésika: (pdfUrlInputs.ésika || '').trim(),
+      cyzone: (pdfUrlInputs.cyzone || '').trim(),
+      lbel: (pdfUrlInputs.lbel || '').trim(),
     };
 
     const updatedPdfInfo = { ...(campaignConfig.catalogPdfInfo || {}) };
     (['ésika', 'cyzone', 'lbel'] as ActiveBrand[]).forEach((b) => {
       const url = currentPdfUrls[b];
-      if (url && !updatedPdfInfo[b]) {
+      if (url) {
         updatedPdfInfo[b] = {
-          fileName: url.split('/').pop()?.split('?')[0] || `catalogo-${b}.pdf`,
-          fileSize: 0,
+          fileName: updatedPdfInfo[b]?.fileName || url.split('/').pop()?.split('?')[0] || `catalogo-${b}.pdf`,
+          fileSize: updatedPdfInfo[b]?.fileSize || 0,
           updatedAt: new Date().toISOString(),
-          isUploaded: false,
+          isUploaded: true,
         };
+      } else {
+        updatedPdfInfo[b] = null;
       }
     });
 
-    await updateCampaignConfig({
-      campaignNumber: campaignNumber.trim(),
-      closingDate: new Date(closingDate).toISOString(),
-      whatsappNumber: whatsappNumber.trim(),
-      consultantName: consultantName.trim(),
+    const campaignName = campaignNumber.trim() || 'Campaña C-15 (2026)';
+    const codeMatch = campaignName.match(/C-\d+/i);
+    const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+    // Captura el valor exacto del input de fecha/hora de cierre asegurando formato ISO válido
+    const finalClosingDate = parseDateTimeLocalToIso(closingDate);
+
+    const catalogLinksAndPdfs = {
+      ésika: currentPdfUrls.ésika || safeEsikaUrl,
+      cyzone: currentPdfUrls.cyzone || safeCyzoneUrl,
+      lbel: currentPdfUrls.lbel || safeLbelUrl,
+      pdfUrls: currentPdfUrls,
       catalogUrls: {
         ésika: safeEsikaUrl,
         cyzone: safeCyzoneUrl,
         lbel: safeLbelUrl,
       },
-      catalogPdfUrls: currentPdfUrls,
-      catalogPdfInfo: updatedPdfInfo,
-    });
+      pdfInfo: updatedPdfInfo,
+      whatsappNumber: whatsappNumber.trim(),
+      consultantName: consultantName.trim(),
+    };
+
+    const campaignPayload = {
+      id: 'current_campaign',
+      campaign_name: campaignName,
+      campaign_code: campaignCode,
+      end_date: finalClosingDate, // Asegurar formato ISO o string válido
+      catalogs: catalogLinksAndPdfs,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase.from('campaign_settings').upsert(campaignPayload);
+    if (error) {
+      console.error('Error al guardar campaña en Supabase:', error);
+      alert('Error al guardar campaña: ' + error.message);
+    } else {
+      try {
+        await supabase.from('catalogs').upsert({
+          id: 'active',
+          campaign_number: campaignName,
+          closing_date: finalClosingDate,
+          whatsapp_number: whatsappNumber.trim(),
+          consultant_name: consultantName.trim(),
+          catalog_urls: catalogLinksAndPdfs.catalogUrls,
+          catalog_pdf_urls: currentPdfUrls,
+          catalog_pdf_info: updatedPdfInfo,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      } catch (catErr) {
+        console.warn('Aviso al guardar en catalogs:', catErr);
+      }
+
+      const updatedConfig: CampaignConfig = {
+        campaignNumber: campaignName,
+        closingDate: finalClosingDate,
+        whatsappNumber: whatsappNumber.trim(),
+        consultantName: consultantName.trim(),
+        catalogUrls: catalogLinksAndPdfs.catalogUrls,
+        catalogPdfUrls: currentPdfUrls,
+        catalogPdfInfo: updatedPdfInfo,
+      };
+
+      setCampaignConfig(updatedConfig);
+      try {
+        localStorage.setItem('lausser_campaign_v1', JSON.stringify(updatedConfig));
+      } catch (e) {
+        console.error(e);
+      }
+
+      alert('¡Campaña y fecha de cierre sincronizadas con éxito en la nube!');
+    }
   };
 
   const handlePasswordChangeSubmit = (e: React.FormEvent) => {
@@ -1226,7 +1552,7 @@ export const AdminPanel: React.FC = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => deleteCatalogPdfFile(brandKey)}
+                              onClick={() => handleDeletePdf(brandKey)}
                               className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
                               title="Eliminar PDF actual"
                             >
@@ -1242,10 +1568,10 @@ export const AdminPanel: React.FC = () => {
                         {/* Option 1: File Uploader Input */}
                         <div className="bg-white rounded-2xl p-4 border border-neutral-200 space-y-2">
                           <span className="text-xs font-bold text-neutral-700 block uppercase">
-                            Opción 1: Subir Archivo PDF (.pdf)
+                            Opción 1: Subir Archivo PDF a la Nube (Supabase Storage)
                           </span>
                           <p className="text-[11px] text-neutral-500">
-                            Sube el archivo PDF de la revista desde tu celular o computadora. Se guarda localmente con IndexedDB sin límite de tamaño.
+                            Sube el archivo PDF (.pdf) desde tu dispositivo. Se subirá al almacenamiento en la nube para que esté disponible en todos los celulares y computadores.
                           </p>
                           <div>
                             <input
@@ -1265,7 +1591,7 @@ export const AdminPanel: React.FC = () => {
                               {isUploading ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
-                                  <span>Guardando PDF en almacenamiento local...</span>
+                                  <span>Subiendo archivo a Supabase Storage...</span>
                                 </>
                               ) : (
                                 <>
@@ -1280,15 +1606,15 @@ export const AdminPanel: React.FC = () => {
                         {/* Option 2: Direct PDF URL Input */}
                         <div className="bg-white rounded-2xl p-4 border border-neutral-200 space-y-2">
                           <span className="text-xs font-bold text-neutral-700 block uppercase">
-                            Opción 2: O ingresar URL directa al PDF
+                            Opción 2: O ingresar Enlace / URL pública del PDF (Drive / Belcorp)
                           </span>
                           <p className="text-[11px] text-neutral-500">
-                            Si tu archivo PDF está alojado en Cloudinary, Google Drive o Firebase:
+                            Pega un enlace público de Google Drive, Somos Belcorp, Cloudinary o cualquier URL externa. ¡Se sincronizará en todos los celulares!
                           </p>
                           <div className="flex items-center gap-1.5">
                             <input
                               type="url"
-                              placeholder="https://.../revista.pdf"
+                              placeholder="https://drive.google.com/... o https://.../revista.pdf"
                               value={pdfUrlInputs[brandKey] || ''}
                               onChange={(e) =>
                                 setPdfUrlInputs((prev) => ({ ...prev, [brandKey]: e.target.value }))
