@@ -84,26 +84,26 @@ export const mapRowToProduct = (row: DbProductRow | any): Product => {
 };
 
 /**
- * Maps frontend Product model to database row representation
+ * Maps frontend Product model to sanitized database row representation
+ * sending ONLY the exact existing columns in the Supabase products table.
  */
-export const mapProductToRow = (product: Product | (Omit<Product, 'id'> & { id?: string })) => {
+export const sanitizeProductForDb = (product: any) => {
   return {
-    id: product.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
-    name: product.name,
-    brand: product.brand,
-    category: product.category,
-    code: product.code || null,
-    price: product.price,
-    discount_price: product.discountPrice ?? null,
-    stock: product.stock,
-    image_url: product.imageUrl,
+    id: String(product.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7))),
+    name: String(product.name || ''),
+    brand: String(product.brand || ''),
+    category: String(product.category || ''),
+    price: Number(product.price || 0),
+    original_price: (product.originalPrice ?? product.discountPrice) ? Number(product.originalPrice ?? product.discountPrice) : null,
+    image: product.image || product.imageUrl || '',
+    in_stock: Boolean(product.inStock ?? (product.stock !== undefined ? product.stock > 0 : true)),
     description: product.description || '',
-    rating: product.rating ?? 4.9,
-    is_featured: Boolean(product.isFeatured),
-    volume_or_size: product.volumeOrSize || null,
-    updated_at: new Date().toISOString(),
+    code: product.code ? String(product.code) : null,
+    stock: Number(product.stock ?? 1),
   };
 };
+
+export const mapProductToRow = sanitizeProductForDb;
 
 /**
  * Maps database catalog row to frontend CampaignConfig
@@ -172,43 +172,44 @@ export const fetchProductsFromDb = async (): Promise<Product[] | null> => {
 
 export const createProductInDb = async (product: Product): Promise<Product | null> => {
   try {
-    const row = mapProductToRow(product);
+    const sanitizedProduct = sanitizeProductForDb(product);
     const { data, error } = await supabase
       .from('products')
-      .insert(row)
-      .select()
-      .single();
+      .upsert(sanitizedProduct);
 
     if (error) {
-      console.error('[Supabase] Error creating product:', error.message);
+      console.error('ERROR AL GUARDAR EN SUPABASE:', error);
+      alert('Error Supabase: ' + (error.message || JSON.stringify(error)));
       return null;
     }
 
-    return mapRowToProduct(data);
+    console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
+    return product;
   } catch (err) {
-    console.error('[Supabase] Exception creating product:', err);
+    console.error('ERROR AL GUARDAR EN SUPABASE (excepción):', err);
+    alert('Error Supabase: ' + String(err));
     return null;
   }
 };
 
 export const updateProductInDb = async (product: Product): Promise<Product | null> => {
   try {
-    const row = mapProductToRow(product);
+    const sanitizedProduct = sanitizeProductForDb(product);
     const { data, error } = await supabase
       .from('products')
-      .update(row)
-      .eq('id', product.id)
-      .select()
-      .single();
+      .upsert(sanitizedProduct);
 
     if (error) {
-      console.error('[Supabase] Error updating product:', error.message);
+      console.error('ERROR AL GUARDAR EN SUPABASE:', error);
+      alert('Error Supabase: ' + (error.message || JSON.stringify(error)));
       return null;
     }
 
-    return mapRowToProduct(data);
+    console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
+    return product;
   } catch (err) {
-    console.error('[Supabase] Exception updating product:', err);
+    console.error('ERROR AL GUARDAR EN SUPABASE (excepción):', err);
+    alert('Error Supabase: ' + String(err));
     return null;
   }
 };

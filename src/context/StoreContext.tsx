@@ -374,19 +374,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const syncToCloud = async () => {
     setIsSyncing(true);
     try {
-      const rows = products.map(mapProductToRow);
-      const { error: prodErr } = await supabase.from('products').upsert(rows, { onConflict: 'id' });
-      const { error: catErr } = await supabase.from('catalogs').upsert(mapCampaignToRow(campaignConfig), { onConflict: 'id' });
-      if (!prodErr && !catErr) {
+      const sanitizedRows = products.map((p) => ({
+        id: String(p.id),
+        name: String(p.name || ''),
+        brand: String(p.brand || ''),
+        category: String(p.category || ''),
+        price: Number(p.price || 0),
+        original_price: (p.originalPrice ?? p.discountPrice) ? Number(p.originalPrice ?? p.discountPrice) : null,
+        image: p.image || p.imageUrl || '',
+        in_stock: Boolean(p.inStock ?? true),
+        description: p.description || '',
+        code: p.code ? String(p.code) : null,
+        stock: Number(p.stock ?? 1),
+      }));
+
+      const { data, error: prodErr } = await supabase.from('products').upsert(sanitizedRows);
+      if (prodErr) {
+        console.error('ERROR AL GUARDAR EN SUPABASE:', prodErr);
+        alert('Error Supabase: ' + (prodErr.message || JSON.stringify(prodErr)));
+      } else {
+        console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
+        const { error: catErr } = await supabase.from('catalogs').upsert(mapCampaignToRow(campaignConfig), { onConflict: 'id' });
+        if (catErr) {
+          console.error('Error guardando catálogo:', catErr);
+        }
         setIsCloudSynced(true);
         setSyncStatus('connected');
         showToast('Inventario y catálogos sincronizados en la nube con éxito', 'success');
-      } else {
-        showToast('Hubo un problema al sincronizar algunos datos', 'warning');
       }
     } catch (err) {
-      console.error('Error syncing data to cloud:', err);
-      showToast('Error al conectar con la base de datos', 'warning');
+      console.error('ERROR AL GUARDAR EN SUPABASE (excepción):', err);
+      alert('Error Supabase (excepción): ' + String(err));
       setSyncStatus('error');
     } finally {
       setIsSyncing(false);
@@ -601,33 +619,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id,
     };
 
+    const sanitizedProduct = {
+      id: String(newProduct.id),
+      name: String(newProduct.name || ''),
+      brand: String(newProduct.brand || ''),
+      category: String(newProduct.category || ''),
+      price: Number(newProduct.price || 0),
+      original_price: (newProduct.originalPrice ?? newProduct.discountPrice) ? Number(newProduct.originalPrice ?? newProduct.discountPrice) : null,
+      image: newProduct.image || newProduct.imageUrl || '',
+      in_stock: Boolean(newProduct.inStock ?? true),
+      description: newProduct.description || '',
+      code: newProduct.code ? String(newProduct.code) : null,
+      stock: Number(newProduct.stock ?? 1),
+    };
+
     // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => [newProduct, ...prev]);
 
-    // 2. Realizar la operación directamente en Supabase
+    // 2. Realizar la operación directamente en Supabase con upsert
     try {
       setIsSyncing(true);
-      const row = mapProductToRow(newProduct);
-      const { data, error } = await supabase
-        .from('products')
-        .insert(row)
-        .select()
-        .single();
-
+      const { data, error } = await supabase.from('products').upsert(sanitizedProduct);
       if (error) {
-        console.error('Error insertando producto en Supabase:', error);
-        showToast('Guardado local (aviso Supabase: ' + error.message + ')', 'warning');
+        console.error('ERROR AL GUARDAR EN SUPABASE:', error);
+        alert('Error Supabase: ' + (error.message || JSON.stringify(error)));
       } else {
-        console.log('Producto guardado en Supabase:', data);
+        console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
         showToast(`Producto "${newProduct.name}" guardado y sincronizado`, 'success');
-        if (data) {
-          const savedProduct = mapRowToProduct(data);
-          setProducts((prev) => prev.map((p) => (p.id === newProduct.id ? savedProduct : p)));
-          return savedProduct;
-        }
       }
     } catch (err) {
-      console.error('Excepción al insertar en Supabase:', err);
+      console.error('ERROR AL GUARDAR EN SUPABASE (excepción):', err);
+      alert('Error Supabase: ' + String(err));
     } finally {
       setIsSyncing(false);
     }
@@ -639,22 +661,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // 1. Actualizar el estado de React para reflejarlo en pantalla inmediatamente
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
 
-    // 2. Realizar la operación directamente en Supabase
-    try {
-      const row = mapProductToRow(updated);
-      const { error } = await supabase
-        .from('products')
-        .update(row)
-        .eq('id', updated.id);
+    const sanitizedProduct = {
+      id: String(updated.id),
+      name: String(updated.name || ''),
+      brand: String(updated.brand || ''),
+      category: String(updated.category || ''),
+      price: Number(updated.price || 0),
+      original_price: (updated.originalPrice ?? updated.discountPrice) ? Number(updated.originalPrice ?? updated.discountPrice) : null,
+      image: updated.image || updated.imageUrl || '',
+      in_stock: Boolean(updated.inStock ?? true),
+      description: updated.description || '',
+      code: updated.code ? String(updated.code) : null,
+      stock: Number(updated.stock ?? 1),
+    };
 
+    // 2. Realizar la operación directamente en Supabase con upsert
+    try {
+      const { data, error } = await supabase.from('products').upsert(sanitizedProduct);
       if (error) {
-        console.error('Error actualizando producto en Supabase:', error);
-        showToast('Error al actualizar en Supabase', 'warning');
+        console.error('ERROR AL GUARDAR EN SUPABASE:', error);
+        alert('Error Supabase: ' + (error.message || JSON.stringify(error)));
       } else {
+        console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
         showToast('Producto actualizado', 'success');
       }
     } catch (err) {
-      console.error('Excepción al actualizar en Supabase:', err);
+      console.error('ERROR AL GUARDAR EN SUPABASE (excepción):', err);
+      alert('Error Supabase: ' + String(err));
     }
   };
 
@@ -664,19 +697,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // 2. Realizar la operación directamente en Supabase
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('products')
         .delete()
         .eq('id', id);
 
       if (error) {
-        console.error('Error eliminando producto en Supabase:', error);
-        showToast('Error al eliminar de Supabase', 'warning');
+        console.error('ERROR AL ELIMINAR EN SUPABASE:', error);
+        alert('Error Supabase: ' + (error.message || JSON.stringify(error)));
       } else {
+        console.log('PRODUCTO ELIMINADO DE SUPABASE:', data);
         showToast('Producto retirado del catálogo', 'info');
       }
     } catch (err) {
-      console.error('Excepción al eliminar en Supabase:', err);
+      console.error('ERROR AL ELIMINAR EN SUPABASE (excepción):', err);
+      alert('Error Supabase: ' + String(err));
     }
   };
 

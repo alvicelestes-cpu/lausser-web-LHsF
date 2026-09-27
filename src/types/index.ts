@@ -23,6 +23,9 @@ export interface Product {
   rating?: number;
   isFeatured?: boolean;
   volumeOrSize?: string;
+  originalPrice?: number;
+  image?: string;
+  inStock?: boolean;
 }
 
 export type CartItemType = 'stock' | 'campaign';
