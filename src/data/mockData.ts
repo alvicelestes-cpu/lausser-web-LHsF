@@ -233,7 +233,7 @@ const getDefaultClosingDate = (): string => {
 };
 
 export const initialCampaignConfig: CampaignConfig = {
-  campaignNumber: 'C-14 (2026)',
+  campaignNumber: 'C-15 (2026)',
   closingDate: getDefaultClosingDate(),
   whatsappNumber: '573001234567',
   consultantName: 'Asesoría Lausser',
@@ -243,8 +243,8 @@ export const initialCampaignConfig: CampaignConfig = {
     lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
   },
   catalogPdfUrls: {
-    ésika: 'https://esika.tiendabelcorp.com.co/catalogo-digital',
-    cyzone: 'https://cyzone.tiendabelcorp.com.co/catalogo-digital',
-    lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
+    ésika: '',
+    cyzone: '',
+    lbel: '',
   },
 };

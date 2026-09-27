@@ -16,8 +16,9 @@ import {
   mapProductToRow,
   mapRowToCampaign,
   mapCampaignToRow,
+  mapCampaignToSettingsRow,
 } from '../services/supabase';
-import type { DbProductRow, DbCatalogRow } from '../services/supabase';
+import type { DbProductRow, DbCatalogRow, DbCampaignSettingsRow } from '../services/supabase';
 
 interface ToastState {
   id: string;
@@ -175,9 +176,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           cyzone: isObsolete(parsed.catalogPdfUrls?.cyzone) ? defaultUrls.cyzone : parsed.catalogPdfUrls.cyzone,
           lbel: isObsolete(parsed.catalogPdfUrls?.lbel) ? defaultUrls.lbel : parsed.catalogPdfUrls.lbel,
         };
+        const campaignNumber = (parsed.campaignNumber && !parsed.campaignNumber.includes('C-14'))
+          ? parsed.campaignNumber
+          : initialCampaignConfig.campaignNumber;
+
         return {
           ...initialCampaignConfig,
           ...parsed,
+          campaignNumber,
           catalogUrls: updatedCatalogUrls,
           catalogPdfUrls: updatedPdfUrls,
         };
@@ -243,17 +249,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const loadData = async () => {
       try {
         // Consulta directa a Supabase
-        const { data, error } = await supabase.from('products').select('*');
+        const { data: prodData, error: prodError } = await supabase.from('products').select('*');
 
-        if (error) {
-          console.error('Error al cargar productos de Supabase:', error);
+        if (prodError) {
+          console.error('Error al cargar productos de Supabase:', prodError);
           if (isMounted) {
             setSyncStatus('error');
           }
-        } else if (data !== null) {
+        } else if (prodData !== null) {
           // Imprime por consola y actualiza con los datos reales de Supabase (incluso si está vacío [])
-          console.log('Productos cargados de Supabase:', data?.length);
-          const mapped = sanitizeProducts(data.map(mapRowToProduct));
+          console.log('Productos cargados de Supabase:', prodData?.length);
+          const mapped = sanitizeProducts(prodData.map(mapRowToProduct));
           if (isMounted) {
             setProducts(mapped);
             try {
@@ -266,21 +272,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
 
-        // Consultar configuración de campaña y catálogos en Supabase
-        const { data: catData, error: catError } = await supabase
-          .from('catalogs')
+        // 1. Consulta Supabase en 'campaign_settings' según requerimiento
+        const { data, error } = await supabase
+          .from('campaign_settings')
           .select('*')
-          .eq('id', 'active')
-          .maybeSingle();
+          .eq('id', 'current_campaign')
+          .single();
 
-        if (!catError && catData && isMounted) {
-          const cloudCampaign = mapRowToCampaign(catData);
+        if (data && !error && isMounted) {
+          const cloudCampaign = mapRowToCampaign(data);
           setCampaignConfig((prev) => {
             const updated = {
               ...prev,
               ...cloudCampaign,
               catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
               catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
+              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
             };
             try {
               localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
@@ -289,6 +296,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             return updated;
           });
+        } else {
+          // 2. Fallback a tabla 'catalogs'
+          const { data: catData, error: catError } = await supabase
+            .from('catalogs')
+            .select('*')
+            .eq('id', 'active')
+            .maybeSingle();
+
+          if (!catError && catData && isMounted) {
+            const cloudCampaign = mapRowToCampaign(catData);
+            setCampaignConfig((prev) => {
+              const updated = {
+                ...prev,
+                ...cloudCampaign,
+                catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
+                catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
+                catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
+              };
+              try {
+                localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(updated));
+              } catch (e) {
+                console.error(e);
+              }
+              return updated;
+            });
+          }
         }
       } catch (err) {
         console.error('Excepción al conectar con Supabase:', err);
@@ -340,7 +373,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         (payload) => {
           if (payload.new) {
             const config = mapRowToCampaign(payload.new as DbCatalogRow);
-            setCampaignConfig((prev) => ({ ...prev, ...config }));
+            setCampaignConfig((prev) => ({
+              ...prev,
+              ...config,
+              catalogUrls: { ...prev.catalogUrls, ...config.catalogUrls },
+              catalogPdfUrls: { ...prev.catalogPdfUrls, ...config.catalogPdfUrls },
+              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(config.catalogPdfInfo || {}) },
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    const campChannel = supabase
+      .channel('campaign-settings-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'campaign_settings' },
+        (payload) => {
+          if (payload.new) {
+            const config = mapRowToCampaign(payload.new as DbCampaignSettingsRow);
+            setCampaignConfig((prev) => ({
+              ...prev,
+              ...config,
+              catalogUrls: { ...prev.catalogUrls, ...config.catalogUrls },
+              catalogPdfUrls: { ...prev.catalogPdfUrls, ...config.catalogPdfUrls },
+              catalogPdfInfo: { ...prev.catalogPdfInfo, ...(config.catalogPdfInfo || {}) },
+            }));
           }
         }
       )
@@ -350,6 +409,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isMounted = false;
       supabase.removeChannel(channel);
       supabase.removeChannel(catChannel);
+      supabase.removeChannel(campChannel);
     };
   }, []);
 
@@ -369,10 +429,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showToast(`Sincronizado con la nube (${mapped.length} productos)`, 'success');
         setSyncStatus('connected');
       }
-      const { data: catData } = await supabase.from('catalogs').select('*').eq('id', 'active').maybeSingle();
-      if (catData) {
-        const cloudCampaign = mapRowToCampaign(catData);
-        setCampaignConfig((prev) => ({ ...prev, ...cloudCampaign }));
+      // Consultar configuración de campaña: campaign_settings con fallback a catalogs
+      const { data: campData } = await supabase
+        .from('campaign_settings')
+        .select('*')
+        .eq('id', 'current_campaign')
+        .single();
+
+      if (campData) {
+        const cloudCampaign = mapRowToCampaign(campData);
+        setCampaignConfig((prev) => ({
+          ...prev,
+          ...cloudCampaign,
+          catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
+          catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
+          catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
+        }));
+      } else {
+        const { data: catData } = await supabase.from('catalogs').select('*').eq('id', 'active').maybeSingle();
+        if (catData) {
+          const cloudCampaign = mapRowToCampaign(catData);
+          setCampaignConfig((prev) => ({
+            ...prev,
+            ...cloudCampaign,
+            catalogUrls: { ...prev.catalogUrls, ...cloudCampaign.catalogUrls },
+            catalogPdfUrls: { ...prev.catalogPdfUrls, ...cloudCampaign.catalogPdfUrls },
+            catalogPdfInfo: { ...prev.catalogPdfInfo, ...(cloudCampaign.catalogPdfInfo || {}) },
+          }));
+        }
       }
     } catch (err) {
       console.error('Error refreshing from cloud:', err);
@@ -395,10 +479,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         alert('Error Supabase: ' + (prodErr.message || JSON.stringify(prodErr)));
       } else {
         console.log('PRODUCTO GUARDADO EN SUPABASE:', data);
-        const { error: catErr } = await supabase.from('catalogs').upsert(mapCampaignToRow(campaignConfig), { onConflict: 'id' });
-        if (catErr) {
-          console.error('Error guardando catálogo:', catErr);
-        }
+        
+        // Sincronizar en campaign_settings y catalogs
+        const settingsRow = mapCampaignToSettingsRow(campaignConfig);
+        await supabase.from('campaign_settings').upsert(settingsRow);
+        await supabase.from('catalogs').upsert(mapCampaignToRow(campaignConfig), { onConflict: 'id' });
+
         setIsCloudSynced(true);
         setSyncStatus('connected');
         showToast('Inventario y catálogos sincronizados en la nube con éxito', 'success');
@@ -465,9 +551,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       };
       setCampaignConfig(newConfig);
-      supabase.from('catalogs').upsert(mapCampaignToRow(newConfig), { onConflict: 'id' }).then(({ error }) => {
-        if (error) console.error('Error updating PDF metadata in cloud:', error);
-      });
+      await updateCampaignConfig(newConfig);
       showToast(`PDF de ${brand} guardado con éxito (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, 'success');
       return true;
     } catch (e) {
@@ -492,9 +576,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       };
       setCampaignConfig(newConfig);
-      supabase.from('catalogs').upsert(mapCampaignToRow(newConfig), { onConflict: 'id' }).then(({ error }) => {
-        if (error) console.error('Error updating PDF deletion in cloud:', error);
-      });
+      await updateCampaignConfig(newConfig);
       showToast(`Catálogo PDF de ${brand} eliminado`, 'info');
     } catch (error) {
       console.error('Error deleting PDF file', error);
@@ -722,20 +804,51 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateCampaignConfig = async (updated: Partial<CampaignConfig>): Promise<void> => {
     const mergedConfig: CampaignConfig = { ...campaignConfig, ...updated };
     setCampaignConfig(mergedConfig);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CAMPAIGN, JSON.stringify(mergedConfig));
+    } catch (e) {
+      console.error(e);
+    }
 
     try {
-      const row = mapCampaignToRow(mergedConfig);
-      const { error } = await supabase
-        .from('catalogs')
-        .upsert(row, { onConflict: 'id' });
+      const campaignName = mergedConfig.campaignNumber || 'Campaña C-15 (2026)';
+      const codeMatch = campaignName.match(/C-\d+/i);
+      const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
 
-      if (error) {
-        console.error('Error guardando campaña en Supabase:', error);
-      } else {
-        showToast('Campaña guardada y sincronizada en la nube', 'success');
+      // URLs de visores/PDFs accesibles para no saturar el payload
+      const catalogsPayload = {
+        ésika: mergedConfig.catalogPdfUrls?.ésika || mergedConfig.catalogUrls?.ésika || '',
+        cyzone: mergedConfig.catalogPdfUrls?.cyzone || mergedConfig.catalogUrls?.cyzone || '',
+        lbel: mergedConfig.catalogPdfUrls?.lbel || mergedConfig.catalogUrls?.lbel || '',
+        pdfUrls: mergedConfig.catalogPdfUrls,
+        catalogUrls: mergedConfig.catalogUrls,
+        pdfInfo: mergedConfig.catalogPdfInfo,
+        whatsappNumber: mergedConfig.whatsappNumber,
+        consultantName: mergedConfig.consultantName,
+      };
+
+      // 1. Guardar en Supabase mediante upsert en campaign_settings
+      const { error: settingsError } = await supabase.from('campaign_settings').upsert({
+        id: 'current_campaign',
+        campaign_name: campaignName,
+        campaign_code: campaignCode,
+        end_date: mergedConfig.closingDate,
+        catalogs: catalogsPayload,
+        updated_at: new Date().toISOString(),
+      });
+
+      if (settingsError) {
+        console.warn('[Supabase] Warning guardando en campaign_settings:', settingsError.message);
       }
+
+      // 2. Guardar también en tabla catalogs para retrocompatibilidad
+      const row = mapCampaignToRow(mergedConfig);
+      await supabase.from('catalogs').upsert(row, { onConflict: 'id' });
+
+      showToast('Campaña guardada y sincronizada en la nube', 'success');
     } catch (err) {
       console.error('Excepción guardando campaña en Supabase:', err);
+      showToast('Guardado localmente (error al sincronizar en la nube)', 'warning');
     }
   };
 
@@ -752,6 +865,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await supabase.from('products').delete().neq('id', '___dummy___');
       const rows = initialProducts.map(mapProductToRow);
       await supabase.from('products').upsert(rows, { onConflict: 'id' });
+      
+      const campaignName = initialCampaignConfig.campaignNumber || 'C-15 (2026)';
+      await supabase.from('campaign_settings').upsert({
+        id: 'current_campaign',
+        campaign_name: campaignName,
+        campaign_code: 'C-15',
+        end_date: initialCampaignConfig.closingDate,
+        catalogs: {
+          ésika: initialCampaignConfig.catalogPdfUrls?.ésika || initialCampaignConfig.catalogUrls?.ésika || '',
+          cyzone: initialCampaignConfig.catalogPdfUrls?.cyzone || initialCampaignConfig.catalogUrls?.cyzone || '',
+          lbel: initialCampaignConfig.catalogPdfUrls?.lbel || initialCampaignConfig.catalogUrls?.lbel || '',
+          pdfUrls: initialCampaignConfig.catalogPdfUrls,
+          catalogUrls: initialCampaignConfig.catalogUrls,
+          pdfInfo: initialCampaignConfig.catalogPdfInfo,
+          whatsappNumber: initialCampaignConfig.whatsappNumber,
+          consultantName: initialCampaignConfig.consultantName,
+        },
+        updated_at: new Date().toISOString(),
+      });
       await supabase.from('catalogs').upsert(mapCampaignToRow(initialCampaignConfig), { onConflict: 'id' });
       console.log('Productos demo cargados en Supabase');
     } catch (err) {

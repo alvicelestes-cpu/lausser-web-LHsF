@@ -232,7 +232,10 @@ export const CatalogModule: React.FC = () => {
       {/* 3. Eye-Catching Magazine Brand Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
         {catalogBrands.map((card) => {
-          const hasPdf = Boolean(campaignConfig.catalogPdfInfo?.[card.brand]);
+          const hasPdf = Boolean(
+            campaignConfig.catalogPdfInfo?.[card.brand] ||
+            (campaignConfig.catalogPdfUrls?.[card.brand] && campaignConfig.catalogPdfUrls[card.brand].trim().length > 0)
+          );
 
           return (
             <CatalogCard

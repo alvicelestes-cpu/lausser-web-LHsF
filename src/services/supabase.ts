@@ -53,6 +53,16 @@ export interface DbCatalogRow {
   updated_at?: string;
 }
 
+// Database row interface for 'campaign_settings' table
+export interface DbCampaignSettingsRow {
+  id: string;
+  campaign_name?: string;
+  campaign_code?: string;
+  end_date?: string;
+  catalogs?: any;
+  updated_at?: string;
+}
+
 /**
  * Maps database row (snake_case or camelCase) to frontend Product model
  */
@@ -123,25 +133,81 @@ export const sanitizeProductForDb = (product: any) => {
 export const mapProductToRow = sanitizeProductForDb;
 
 /**
- * Maps database catalog row to frontend CampaignConfig
+ * Maps frontend CampaignConfig to database campaign_settings row
  */
-export const mapRowToCampaign = (row: DbCatalogRow | any): CampaignConfig => {
+export const mapCampaignToSettingsRow = (config: CampaignConfig) => {
+  const campaignName = config.campaignNumber || 'C-15 (2026)';
+  const codeMatch = campaignName.match(/C-\d+/i);
+  const campaignCode = codeMatch ? codeMatch[0].toUpperCase() : 'C-15';
+
   return {
-    campaignNumber: row.campaign_number || row.campaignNumber || 'C-14 (2026)',
-    closingDate: row.closing_date || row.closingDate || new Date(Date.now() + 4 * 86400000).toISOString(),
-    whatsappNumber: row.whatsapp_number || row.whatsappNumber || '573001234567',
-    consultantName: row.consultant_name || row.consultantName || 'Asesoría Lausser',
-    catalogUrls: row.catalog_urls || row.catalogUrls || {
-      ésika: 'https://esika.tiendabelcorp.com.co/catalogo-digital',
-      cyzone: 'https://cyzone.tiendabelcorp.com.co/catalogo-digital',
-      lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
+    id: 'current_campaign',
+    campaign_name: campaignName,
+    campaign_code: campaignCode,
+    end_date: config.closingDate,
+    catalogs: {
+      ésika: config.catalogPdfUrls?.ésika || config.catalogUrls?.ésika || '',
+      cyzone: config.catalogPdfUrls?.cyzone || config.catalogUrls?.cyzone || '',
+      lbel: config.catalogPdfUrls?.lbel || config.catalogUrls?.lbel || '',
+      pdfUrls: config.catalogPdfUrls,
+      catalogUrls: config.catalogUrls,
+      pdfInfo: config.catalogPdfInfo,
+      whatsappNumber: config.whatsappNumber,
+      consultantName: config.consultantName,
     },
-    catalogPdfUrls: row.catalog_pdf_urls || row.catalogPdfUrls || {
-      ésika: 'https://esika.tiendabelcorp.com.co/catalogo-digital',
-      cyzone: 'https://cyzone.tiendabelcorp.com.co/catalogo-digital',
-      lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
-    },
-    catalogPdfInfo: row.catalog_pdf_info || row.catalogPdfInfo || undefined,
+    updated_at: new Date().toISOString(),
+  };
+};
+
+/**
+ * Maps database catalog/campaign_settings row to frontend CampaignConfig
+ */
+export const mapRowToCampaign = (row: DbCatalogRow | DbCampaignSettingsRow | any): CampaignConfig => {
+  const rawCatalogs = row.catalogs || {};
+  const isSettingsFormat = Boolean(row.campaign_name || row.campaign_code || row.end_date || row.catalogs);
+
+  const campaignNumber = row.campaign_name || row.campaign_code || row.campaign_number || row.campaignNumber || 'C-15 (2026)';
+  const closingDate = row.end_date || row.closing_date || row.closingDate || new Date(Date.now() + 4 * 86400000).toISOString();
+  const whatsappNumber = rawCatalogs.whatsappNumber || row.whatsapp_number || row.whatsappNumber || '573001234567';
+  const consultantName = rawCatalogs.consultantName || row.consultant_name || row.consultantName || 'Asesoría Lausser';
+
+  // Digital catalog viewer URLs
+  const defaultWeb = {
+    ésika: 'https://esika.tiendabelcorp.com.co/catalogo-digital',
+    cyzone: 'https://cyzone.tiendabelcorp.com.co/catalogo-digital',
+    lbel: 'https://lbel.tiendabelcorp.com.co/catalogo-digital',
+  };
+
+  const catalogUrls = isSettingsFormat
+    ? {
+        ésika: rawCatalogs.catalogUrls?.ésika || (typeof rawCatalogs.ésika === 'string' && !rawCatalogs.ésika.endsWith('.pdf') ? rawCatalogs.ésika : '') || (typeof rawCatalogs.ésika === 'object' ? rawCatalogs.ésika?.webUrl : '') || defaultWeb.ésika,
+        cyzone: rawCatalogs.catalogUrls?.cyzone || (typeof rawCatalogs.cyzone === 'string' && !rawCatalogs.cyzone.endsWith('.pdf') ? rawCatalogs.cyzone : '') || (typeof rawCatalogs.cyzone === 'object' ? rawCatalogs.cyzone?.webUrl : '') || defaultWeb.cyzone,
+        lbel: rawCatalogs.catalogUrls?.lbel || (typeof rawCatalogs.lbel === 'string' && !rawCatalogs.lbel.endsWith('.pdf') ? rawCatalogs.lbel : '') || (typeof rawCatalogs.lbel === 'object' ? rawCatalogs.lbel?.webUrl : '') || defaultWeb.lbel,
+      }
+    : (row.catalog_urls || row.catalogUrls || defaultWeb);
+
+  // PDF catalog URLs (ensuring only valid URLs and not confusing digital catalogs)
+  const catalogPdfUrls = isSettingsFormat
+    ? {
+        ésika: rawCatalogs.pdfUrls?.ésika || rawCatalogs.pdf_urls?.ésika || (typeof rawCatalogs.ésika === 'string' && (rawCatalogs.ésika.endsWith('.pdf') || rawCatalogs.ésika.includes('/pdf')) ? rawCatalogs.ésika : '') || (typeof rawCatalogs.ésika === 'object' ? rawCatalogs.ésika?.pdfUrl : '') || '',
+        cyzone: rawCatalogs.pdfUrls?.cyzone || rawCatalogs.pdf_urls?.cyzone || (typeof rawCatalogs.cyzone === 'string' && (rawCatalogs.cyzone.endsWith('.pdf') || rawCatalogs.cyzone.includes('/pdf')) ? rawCatalogs.cyzone : '') || (typeof rawCatalogs.cyzone === 'object' ? rawCatalogs.cyzone?.pdfUrl : '') || '',
+        lbel: rawCatalogs.pdfUrls?.lbel || rawCatalogs.pdf_urls?.lbel || (typeof rawCatalogs.lbel === 'string' && (rawCatalogs.lbel.endsWith('.pdf') || rawCatalogs.lbel.includes('/pdf')) ? rawCatalogs.lbel : '') || (typeof rawCatalogs.lbel === 'object' ? rawCatalogs.lbel?.pdfUrl : '') || '',
+      }
+    : (row.catalog_pdf_urls || row.catalogPdfUrls || { ésika: '', cyzone: '', lbel: '' });
+
+  // PDF metadata
+  const catalogPdfInfo = isSettingsFormat
+    ? (rawCatalogs.pdfInfo || rawCatalogs.pdf_info || undefined)
+    : (row.catalog_pdf_info || row.catalogPdfInfo || undefined);
+
+  return {
+    campaignNumber,
+    closingDate,
+    whatsappNumber,
+    consultantName,
+    catalogUrls,
+    catalogPdfUrls,
+    catalogPdfInfo,
   };
 };
 
@@ -296,6 +362,18 @@ export const seedProductsInDb = async (products: Product[]): Promise<boolean> =>
 
 export const fetchCampaignConfigFromDb = async (): Promise<CampaignConfig | null> => {
   try {
+    // 1. Prioriza consulta a la tabla 'campaign_settings' con id 'current_campaign'
+    const { data: campData, error: campError } = await supabase
+      .from('campaign_settings')
+      .select('*')
+      .eq('id', 'current_campaign')
+      .single();
+
+    if (!campError && campData) {
+      return mapRowToCampaign(campData);
+    }
+
+    // 2. Fallback a la tabla 'catalogs'
     const { data, error } = await supabase
       .from('catalogs')
       .select('*')
@@ -317,12 +395,23 @@ export const fetchCampaignConfigFromDb = async (): Promise<CampaignConfig | null
 
 export const saveCampaignConfigInDb = async (config: CampaignConfig): Promise<boolean> => {
   try {
+    // 1. Guardar en campaign_settings
+    const settingsRow = mapCampaignToSettingsRow(config);
+    const { error: settingsError } = await supabase
+      .from('campaign_settings')
+      .upsert(settingsRow);
+
+    if (settingsError) {
+      console.warn('[Supabase] Warning saving campaign_settings:', settingsError.message);
+    }
+
+    // 2. Guardar también en catalogs para retrocompatibilidad
     const row = mapCampaignToRow(config);
     const { error } = await supabase
       .from('catalogs')
       .upsert(row, { onConflict: 'id' });
 
-    if (error) {
+    if (error && settingsError) {
       console.error('[Supabase] Error saving catalog config:', error.message);
       return false;
     }
@@ -398,7 +487,22 @@ export const subscribeToCatalogsRealtime = (
     )
     .subscribe();
 
+  const campChannel = supabase
+    .channel('campaign-settings-channel')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'campaign_settings' },
+      (payload) => {
+        if (payload.new) {
+          const config = mapRowToCampaign(payload.new as DbCampaignSettingsRow);
+          onChange(config);
+        }
+      }
+    )
+    .subscribe();
+
   return () => {
     supabase.removeChannel(channel);
+    supabase.removeChannel(campChannel);
   };
 };

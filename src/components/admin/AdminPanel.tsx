@@ -249,9 +249,9 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  const handleSavePdfUrl = (brandToSave: ActiveBrand) => {
+  const handleSavePdfUrl = async (brandToSave: ActiveBrand) => {
     const url = (pdfUrlInputs[brandToSave] || '').trim();
-    updateCampaignConfig({
+    await updateCampaignConfig({
       catalogPdfUrls: {
         ...campaignConfig.catalogPdfUrls,
         [brandToSave]: url,
@@ -260,7 +260,7 @@ export const AdminPanel: React.FC = () => {
         ...campaignConfig.catalogPdfInfo,
         [brandToSave]: url
           ? {
-              fileName: url.split('/').pop() || `catalogo-${brandToSave}.pdf`,
+              fileName: url.split('/').pop()?.split('?')[0] || `catalogo-${brandToSave}.pdf`,
               fileSize: 0,
               updatedAt: new Date().toISOString(),
               isUploaded: false,
@@ -319,13 +319,32 @@ export const AdminPanel: React.FC = () => {
     setActiveAdminTab('inventario');
   };
 
-  const handleCampaignSubmit = (e: React.FormEvent) => {
+  const handleCampaignSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const safeEsikaUrl = esikaUrl.trim() || OFFICIAL_CATALOG_URLS.ésika;
     const safeCyzoneUrl = cyzoneUrl.trim() || OFFICIAL_CATALOG_URLS.cyzone;
     const safeLbelUrl = lbelUrl.trim() || OFFICIAL_CATALOG_URLS.lbel;
 
-    updateCampaignConfig({
+    const currentPdfUrls = {
+      ésika: (pdfUrlInputs.ésika || '').trim() || campaignConfig.catalogPdfUrls?.ésika || '',
+      cyzone: (pdfUrlInputs.cyzone || '').trim() || campaignConfig.catalogPdfUrls?.cyzone || '',
+      lbel: (pdfUrlInputs.lbel || '').trim() || campaignConfig.catalogPdfUrls?.lbel || '',
+    };
+
+    const updatedPdfInfo = { ...(campaignConfig.catalogPdfInfo || {}) };
+    (['ésika', 'cyzone', 'lbel'] as ActiveBrand[]).forEach((b) => {
+      const url = currentPdfUrls[b];
+      if (url && !updatedPdfInfo[b]) {
+        updatedPdfInfo[b] = {
+          fileName: url.split('/').pop()?.split('?')[0] || `catalogo-${b}.pdf`,
+          fileSize: 0,
+          updatedAt: new Date().toISOString(),
+          isUploaded: false,
+        };
+      }
+    });
+
+    await updateCampaignConfig({
       campaignNumber: campaignNumber.trim(),
       closingDate: new Date(closingDate).toISOString(),
       whatsappNumber: whatsappNumber.trim(),
@@ -335,11 +354,8 @@ export const AdminPanel: React.FC = () => {
         cyzone: safeCyzoneUrl,
         lbel: safeLbelUrl,
       },
-      catalogPdfUrls: {
-        ésika: safeEsikaUrl,
-        cyzone: safeCyzoneUrl,
-        lbel: safeLbelUrl,
-      },
+      catalogPdfUrls: currentPdfUrls,
+      catalogPdfInfo: updatedPdfInfo,
     });
   };
 

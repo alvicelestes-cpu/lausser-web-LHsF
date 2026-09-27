@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_products_created_at ON public.products(created_at
 -- 2. TABLA: catalogs (Configuración de campaña y enlaces a catálogos/revistas)
 CREATE TABLE IF NOT EXISTS public.catalogs (
   id TEXT PRIMARY KEY DEFAULT 'active',
-  campaign_number TEXT NOT NULL DEFAULT 'C-14 (2026)',
+  campaign_number TEXT NOT NULL DEFAULT 'C-15 (2026)',
   closing_date TIMESTAMPTZ NOT NULL,
   whatsapp_number TEXT NOT NULL DEFAULT '573001234567',
   consultant_name TEXT NOT NULL DEFAULT 'Asesoría Lausser',
@@ -40,19 +40,39 @@ CREATE TABLE IF NOT EXISTS public.catalogs (
     "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital"
   }'::jsonb,
   catalog_pdf_urls JSONB NOT NULL DEFAULT '{
-    "ésika": "https://esika.tiendabelcorp.com.co/catalogo-digital",
-    "cyzone": "https://cyzone.tiendabelcorp.com.co/catalogo-digital",
-    "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital"
+    "ésika": "",
+    "cyzone": "",
+    "lbel": ""
   }'::jsonb,
   catalog_pdf_info JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 3. HABILITAR ROW LEVEL SECURITY (RLS)
+-- 3. TABLA: campaign_settings (Sincronización global de Campaña C-15 y Revistas Digitales)
+CREATE TABLE IF NOT EXISTS public.campaign_settings (
+  id TEXT PRIMARY KEY DEFAULT 'current_campaign',
+  campaign_name TEXT NOT NULL DEFAULT 'Campaña C-15 (2026)',
+  campaign_code TEXT NOT NULL DEFAULT 'C-15',
+  end_date TIMESTAMPTZ NOT NULL,
+  catalogs JSONB NOT NULL DEFAULT '{
+    "ésika": "https://esika.tiendabelcorp.com.co/catalogo-digital",
+    "cyzone": "https://cyzone.tiendabelcorp.com.co/catalogo-digital",
+    "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital",
+    "pdfUrls": {
+      "ésika": "",
+      "cyzone": "",
+      "lbel": ""
+    }
+  }'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 4. HABILITAR ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.catalogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.campaign_settings ENABLE ROW LEVEL SECURITY;
 
--- 4. POLÍTICAS DE ACCESO PÚBLICO / ANON
+-- 5. POLÍTICAS DE ACCESO PÚBLICO / ANON
 -- Permitir lectura a todos los usuarios (clientes y administradores)
 DROP POLICY IF EXISTS "Public read access for products" ON public.products;
 CREATE POLICY "Public read access for products" 
@@ -64,6 +84,13 @@ CREATE POLICY "Public read access for products"
 DROP POLICY IF EXISTS "Public read access for catalogs" ON public.catalogs;
 CREATE POLICY "Public read access for catalogs" 
   ON public.catalogs 
+  FOR SELECT 
+  TO anon, authenticated 
+  USING (true);
+
+DROP POLICY IF EXISTS "Public read access for campaign_settings" ON public.campaign_settings;
+CREATE POLICY "Public read access for campaign_settings" 
+  ON public.campaign_settings 
   FOR SELECT 
   TO anon, authenticated 
   USING (true);
@@ -85,7 +112,15 @@ CREATE POLICY "Allow mutations on catalogs"
   USING (true) 
   WITH CHECK (true);
 
--- 5. HABILITAR TIEMPO REAL (REALTIME)
+DROP POLICY IF EXISTS "Allow mutations on campaign_settings" ON public.campaign_settings;
+CREATE POLICY "Allow mutations on campaign_settings" 
+  ON public.campaign_settings 
+  FOR ALL 
+  TO anon, authenticated 
+  USING (true) 
+  WITH CHECK (true);
+
+-- 6. HABILITAR TIEMPO REAL (REALTIME)
 -- Permite que cuando el administrador guarde en su celular, los clientes vean el cambio de inmediato
 DO $$
 BEGIN
@@ -100,10 +135,52 @@ BEGIN
   EXCEPTION WHEN duplicate_object THEN
     NULL;
   END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.campaign_settings;
+  EXCEPTION WHEN duplicate_object THEN
+    NULL;
+  END;
 END $$;
 
--- 6. DATOS INICIALES (SEMILLA / SEED DATA)
--- Campaña activa por defecto
+-- 7. DATOS INICIALES (SEMILLA / SEED DATA)
+-- Campaña activa por defecto en campaign_settings
+INSERT INTO public.campaign_settings (
+  id,
+  campaign_name,
+  campaign_code,
+  end_date,
+  catalogs
+) VALUES (
+  'current_campaign',
+  'Campaña C-15 (2026)',
+  'C-15',
+  NOW() + interval '14 days',
+  '{
+    "ésika": "https://esika.tiendabelcorp.com.co/catalogo-digital",
+    "cyzone": "https://cyzone.tiendabelcorp.com.co/catalogo-digital",
+    "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital",
+    "pdfUrls": {
+      "ésika": "",
+      "cyzone": "",
+      "lbel": ""
+    },
+    "catalogUrls": {
+      "ésika": "https://esika.tiendabelcorp.com.co/catalogo-digital",
+      "cyzone": "https://cyzone.tiendabelcorp.com.co/catalogo-digital",
+      "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital"
+    },
+    "whatsappNumber": "573001234567",
+    "consultantName": "Asesoría Lausser"
+  }'::jsonb
+) ON CONFLICT (id) DO UPDATE SET
+  campaign_name = EXCLUDED.campaign_name,
+  campaign_code = EXCLUDED.campaign_code,
+  end_date = EXCLUDED.end_date,
+  catalogs = EXCLUDED.catalogs,
+  updated_at = NOW();
+
+-- Catálogos heredados
 INSERT INTO public.catalogs (
   id,
   campaign_number,
@@ -114,8 +191,8 @@ INSERT INTO public.catalogs (
   catalog_pdf_urls
 ) VALUES (
   'active',
-  'C-14 (2026)',
-  NOW() + interval '4 days',
+  'C-15 (2026)',
+  NOW() + interval '14 days',
   '573001234567',
   'Asesoría Lausser',
   '{
@@ -124,11 +201,14 @@ INSERT INTO public.catalogs (
     "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital"
   }'::jsonb,
   '{
-    "ésika": "https://esika.tiendabelcorp.com.co/catalogo-digital",
-    "cyzone": "https://cyzone.tiendabelcorp.com.co/catalogo-digital",
-    "lbel": "https://lbel.tiendabelcorp.com.co/catalogo-digital"
+    "ésika": "",
+    "cyzone": "",
+    "lbel": ""
   }'::jsonb
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET
+  campaign_number = EXCLUDED.campaign_number,
+  closing_date = EXCLUDED.closing_date,
+  updated_at = NOW();
 
 -- Productos iniciales de prueba (Ésika, Cyzone, L'Bel)
 INSERT INTO public.products (id, name, brand, category, code, price, discount_price, stock, image_url, description, rating, is_featured, volume_or_size)
